@@ -1,18 +1,21 @@
 /**
- * CDL+BS Verification and Update — JSON API for the GitHub-hosted website.
- * Divisions check their DLs / CDLs (pre-filled from the July 2026 returns) and enter their Ban Sahayaks.
+ * DL / CDL, Ban Sahayak, Aranya Sathi and DEO — the CDL+BS API inside this wrapper. Sign-in, sign-up and users are in Core.gs.
+ * Divisions check their DLs / CDLs (pre-filled from the July 2026 returns) and enter their Ban Sahayaks, Aranya Sathis and DEOs.
  * Edits save straight in, one person at a time; new DLs / CDLs and removals wait for an admin; the DFO certifies each list.
- * Every change is written to the Change Log with who made it.
- * Data: its own Google Sheet — tabs DL-CDL, Ban Sahayak, Change Log, Certificates, Lists, Users.
- * Auth: division users sign up with their email (confirmed by a code sent to it) and a password, kept as a salted hash in the Users tab;
- * admins are in Config.local.gs (not in GitHub). The server issues a session token kept in the script cache.
+ * Every change is written to the Change Log (in the CDL+BS sheet, for all four cadres) with who made it.
+ * Data: "AranyaHR · CDL+BS" — tabs DL-CDL, Ban Sahayak, Change Log, Certificates, Lists;
+ * "AranyaHR · AS+DEO" — tabs Aranya Sathi, DEO (the same columns as DL-CDL).
  * A division user can change only their own division.
- * Deploy: Web app · Execute as: Me · Who has access: Anyone.
  */
+const Cdlbs = (() => {
+// the same services, with this module's own key prefix (Core.gs); looked up when used, so the order of the files does not matter
+const CacheService = { getScriptCache: () => prefixedCache_('cdl:').getScriptCache() };
+const PropertiesService = { getScriptProperties: () => prefixedProps_('cdl:').getScriptProperties() };
 
-const CONFIG = { TZ: 'Asia/Kolkata', PROP: 'CDLBS_SHEET_ID', TAB: { CDL: 'DL-CDL', BS: 'Ban Sahayak' }, LOG: 'Change Log', CERT: 'Certificates', LISTS: 'Lists', USERS: 'Users' };
-const SESSION_HOURS = 6, MAX_FAILS = 5, LOCK_MIN = 15, CACHE_SEC = 6 * 3600, CODE_MIN = 30, HASH_ROUNDS = 500;
-const APP_NAME = 'CDL+BS Verification and Update';
+const CONFIG = { TZ: 'Asia/Kolkata', TAB: { CDL: 'DL-CDL', BS: 'Ban Sahayak', AS: 'Aranya Sathi', DEO: 'DEO' }, LOG: 'Change Log', CERT: 'Certificates', LISTS: 'Lists', USERS: 'Users' };
+const CADRES = ['CDL', 'BS', 'AS', 'DEO'];
+const CACHE_SEC = 6 * 3600;
+// the earlier Users tab of the CDL+BS sheet, read once by hrSetup to move its users to AranyaHR
 const USER_HEADERS = ['Email', 'Circle', 'Division', 'Name', 'Designation', 'Phone', 'Status', 'Signed up on', 'Last sign-in', 'Salt', 'Password hash'];
 
 // [key, sheet header]; the order is the column order of both people tabs. Columns are found by heading, so moving one is safe.
@@ -38,236 +41,17 @@ const DUTIES = ['Cleaning/Sweeping/Maintenance', 'Nursery Operations', 'Timber D
   'Forest Protection and Patrolling', 'Human-Animal Conflict Management', 'Night Guard/Security', 'Others'];
 const HQ = 'Division HQ', BS_PAY = 12000;
 const REQUIRED = { CDL: ['name', 'mode', 'date', 'district', 'range', 'place', 'duty', 'pay'], BS: ['name', 'date', 'district', 'range', 'place', 'duty'] };
+REQUIRED.AS = REQUIRED.DEO = REQUIRED.CDL;
 const VAGUE = /^\s*(do|d\.o\.?|various|variouss|misc\.?|miscellaneous|other|others|field work|field duty|forestry work|general|all work|-)?\s*$/i;
-const CADRE_NAME = { CDL: 'DL / CDL', BS: 'Ban Sahayak' };
+const CADRE_NAME = { CDL: 'DL / CDL', BS: 'Ban Sahayak', AS: 'Aranya Sathi', DEO: 'DEO' };
 
-function local_() {
-  const L = (typeof LOCAL_CONFIG !== 'undefined') ? LOCAL_CONFIG : {};
-  return { accounts: L.ACCOUNTS || {}, sheetId: L.SHEET_ID || '' };
-}
+/* ============================================================ auth (sign-in is in Core.gs) */
 
-/* ============================================================ HTTP */
-
-function doGet() { return json_({ ok: true, app: 'CDL+BS API', time: now_() }); }
-
-function doPost(e) {
-  try {
-    const body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
-    if (body.action === 'logout') { logout_(body.token); return json_({ ok: true, data: {} }); }
-    // before sign-in
-    const open = { login: login_, lists: lists_, divisionUsers: divisionUsers_, signupStart: signupStart_, signupVerify: signupVerify_,
-      forgotStart: forgotStart_, forgotVerify: forgotVerify_ };
-    if (open[body.action]) return json_({ ok: true, data: open[body.action](body) });
-    const user = authenticate_(body.token);
-    const handlers = { meta: meta_, load: load_, update: update_, confirm: confirm_, unconfirm: unconfirm_, notWorking: notWorking_,
-      undoRemoval: undoRemoval_, resolveFlag: resolveFlag_, add: add_, certify: certify_,
-      pending: pending_, decide: decide_, reopen: reopen_, log: log_, users: users_, userStatus: userStatus_, userPassword: userPassword_ };
-    const fn = handlers[body.action];
-    if (!fn) throw new Error('Unknown action: ' + body.action);
-    if (['pending', 'decide', 'reopen', 'log', 'users', 'userStatus', 'userPassword'].indexOf(body.action) >= 0 && !user.isAdmin) throw new Error('Only administrators can do this.');
-    return json_({ ok: true, data: fn(body, user) });
-  } catch (err) {
-    return json_({ ok: false, error: String(err && err.message || err), conflict: !!(err && err.conflict) });
-  }
-}
-function json_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
-
-/* ============================================================ auth */
-
-function sha256hex_(s) {
-  return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, s, Utilities.Charset.UTF_8)
-    .map(b => ((b + 256) % 256).toString(16).padStart(2, '0')).join('');
-}
-
-/** Division users' passwords: salted SHA-256, repeated, so a copied sheet does not give the passwords away. */
-function pwHash_(salt, pw) {
-  let h = sha256hex_(salt + pw);
-  for (let i = 1; i < HASH_ROUNDS; i++) h = sha256hex_(salt + h);
-  return h;
-}
-const newSalt_ = () => Utilities.getUuid().replace(/-/g, '');
 const who_ = u => u.name + (u.desig ? ' (' + u.desig + ')' : '');
-const cleanEmail_ = s => String(s || '').trim().toLowerCase();
-const EMAIL_OK = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
-
-/**
- * {username or email, password} -> {token, user}. Admins (Config.local.gs) sign in with their username,
- * division users with their email. Wrong attempts lock that name for LOCK_MIN minutes.
- */
-function login_(body) {
-  const cache = CacheService.getScriptCache();
-  const u = cleanEmail_(body.username), pw = String(body.password || '');
-  if (!u || !pw) throw new Error('Enter your email and password.');
-  const failKey = 'fail_' + u, fails = Number(cache.get(failKey) || 0);
-  if (fails >= MAX_FAILS) throw new Error('Too many wrong attempts. Try again after ' + LOCK_MIN + ' minutes, or reset your password.');
-  const wrong = () => { cache.put(failKey, String(fails + 1), LOCK_MIN * 60); return new Error('Wrong email or password.'); };
-  let user;
-  const acc = local_().accounts[u];
-  if (acc) {
-    if (sha256hex_(acc.salt + pw) !== acc.hash) throw wrong();
-    user = { name: acc.name || u, role: acc.role === 'admin' ? 'admin' : 'operator', isAdmin: acc.role === 'admin', username: u };
-    PropertiesService.getScriptProperties().setProperty('last|' + u, now_());   // shown on the admin Users page
-  } else {
-    const t = readUsers_(), r = t.rows.find(x => x.email === u);
-    if (!r || pwHash_(r.salt, pw) !== r.hash) throw wrong();
-    if (r.status !== 'Active') throw new Error('This account is disabled. Please contact the PMC admin.');
-    t.sh.getRange(r._r, USER_HEADERS.indexOf('Last sign-in') + 1).setNumberFormat('@').setValue(now_());
-    CacheService.getScriptCache().remove('off|' + u);
-    user = userOf_(r);
-  }
-  cache.remove(failKey);
-  return session_(user);
-}
-function userOf_(r) {
-  return { name: r.name, role: 'operator', isAdmin: false, username: r.email, email: r.email, circle: r.circle, division: r.division, desig: r.desig, phone: r.phone };
-}
-function session_(user) {
-  const token = 'cb.' + Utilities.getUuid() + Utilities.getUuid().slice(0, 8);
-  CacheService.getScriptCache().put('sess_' + token, JSON.stringify(user), SESSION_HOURS * 3600);
-  return { token, user };
-}
-function logout_(token) { if (token) CacheService.getScriptCache().remove('sess_' + token); }
-function authenticate_(token) {
-  if (!token || String(token).indexOf('cb.') !== 0) throw new Error('Please sign in.');
-  const cache = CacheService.getScriptCache(), s = cache.get('sess_' + token);
-  if (!s) throw new Error('Your sign-in has expired. Please sign in again.');
-  const user = JSON.parse(s);
-  if (user.email && cache.get('off|' + user.email)) { cache.remove('sess_' + token); throw new Error('This account is disabled. Please sign in again.'); }
-  return user;
-}
-/** A division user may change only their own division (admins and the older shared accounts: any). */
+/** A division user may change only their own division (Core lets only division users and admins change anything). */
 function mayEdit_(user, division) {
   if (user.isAdmin || !user.division || user.division === division) return;
   throw new Error('You can change only ' + user.division + '. ' + division + ' is for its own users.');
-}
-
-/* ============================================================ sign-up, password reset, users */
-
-function readUsers_() {
-  const sh = tab_(CONFIG.USERS), v = sh.getDataRange().getValues(), rows = [];
-  const head = (v[0] || []).map(h => String(h).trim()), at = k => head.indexOf(k);
-  const keys = ['email', 'circle', 'division', 'name', 'desig', 'phone', 'status', 'on', 'last', 'salt', 'hash'];
-  for (let r = 1; r < v.length; r++) {
-    const o = { _r: r + 1 }; keys.forEach((k, j) => { const i = at(USER_HEADERS[j]); o[k] = i < 0 ? '' : fmtTs_(v[r][i]); });
-    o.email = cleanEmail_(o.email); if (o.email) rows.push(o);
-  }
-  return { sh, rows };
-}
-/** Circles and divisions for the sign-up form. */
-function lists_() { return { divisions: divisions_() }; }
-/** How many users a division already has (for the "only 1 person per division" note). */
-function divisionUsers_(body) {
-  const d = String(body.division || '');
-  return { count: readUsers_().rows.filter(r => r.division === d && r.status === 'Active').length };
-}
-function code6_() { return String(Math.floor(100000 + Math.random() * 900000)); }
-function mail_(to, subject, text) { MailApp.sendEmail({ to, subject, body: text, name: APP_NAME }); }
-/** Checks a code sent by email; five wrong tries and it is gone. */
-function takeCode_(key, code) {
-  const cache = CacheService.getScriptCache(), s = cache.get(key);
-  if (!s) throw new Error('The code has expired. Please ask for a new one.');
-  const o = JSON.parse(s);
-  if (String(code || '').trim() !== o.code) {
-    o.tries = (o.tries || 0) + 1;
-    if (o.tries >= 5) cache.remove(key); else cache.put(key, JSON.stringify(o), CODE_MIN * 60);
-    throw new Error(o.tries >= 5 ? 'Too many wrong codes. Please ask for a new one.' : 'That code is not right. Please check the email.');
-  }
-  cache.remove(key);
-  return o;
-}
-
-/** Step 1 of sign-up: checks the form and emails a 6-digit code. Nothing is saved until the code is entered. */
-function signupStart_(body) {
-  const email = cleanEmail_(body.email), name = String(body.name || '').replace(/\s+/g, ' ').trim();
-  const desig = String(body.desig || '').replace(/\s+/g, ' ').trim(), phone = String(body.phone || '').replace(/\D/g, '').replace(/^(91|0)(?=\d{10}$)/, '');
-  const pw = String(body.password || '');
-  const div = divisions_().find(d => d.division === String(body.division || '') && d.circle === String(body.circle || ''));
-  if (!div) throw new Error('Choose your circle and division.');
-  if (!EMAIL_OK.test(email)) throw new Error('Write a valid email address.');
-  if (name.length < 3) throw new Error('Write your name.');
-  if (desig.length < 2) throw new Error('Write your designation.');
-  if (!/^[6-9]\d{9}$/.test(phone)) throw new Error('Write a 10-digit mobile number.');
-  if (pw.length < 8) throw new Error('The password must have at least 8 characters.');
-  if (local_().accounts[email] || readUsers_().rows.some(r => r.email === email)) throw new Error('This email already has an account. Sign in, or use "Forgot password".');
-  const code = code6_(), salt = newSalt_();
-  CacheService.getScriptCache().put('su|' + email, JSON.stringify({ code, user: { email, circle: div.circle, division: div.division, name, desig, phone, salt, hash: pwHash_(salt, pw) } }), CODE_MIN * 60);
-  mail_(email, APP_NAME + ': your sign-up code', 'Your sign-up code is ' + code + '.\nIt is valid for ' + CODE_MIN + ' minutes.\n\nDivision: ' + div.division + '\n\nIf you did not sign up, ignore this email.');
-  return { sent: true };
-}
-/** Step 2 of sign-up: the code from the email creates the account and signs in. */
-function signupVerify_(body) {
-  const email = cleanEmail_(body.email), o = takeCode_('su|' + email, body.code), u = o.user;
-  const lock = LockService.getScriptLock(); lock.waitLock(20000);
-  try {
-    const t = readUsers_();
-    if (t.rows.some(r => r.email === email)) throw new Error('This email already has an account. Please sign in.');
-    const row = USER_HEADERS.map(() => ''), set = (h, v) => { row[USER_HEADERS.indexOf(h)] = v; };
-    set('Email', email); set('Circle', u.circle); set('Division', u.division); set('Name', u.name); set('Designation', u.desig); set('Phone', u.phone);
-    set('Status', 'Active'); set('Signed up on', now_()); set('Last sign-in', now_()); set('Salt', u.salt); set('Password hash', u.hash);
-    t.sh.getRange(t.sh.getLastRow() + 1, 1, 1, USER_HEADERS.length).setNumberFormat('@').setValues([row]);
-  } finally { lock.releaseLock(); }
-  return session_(userOf_(u));
-}
-/** Forgot password, step 1: emails a code if the account exists (the answer is the same either way). */
-function forgotStart_(body) {
-  const email = cleanEmail_(body.email);
-  if (!EMAIL_OK.test(email)) throw new Error('Write the email you signed up with.');
-  const r = readUsers_().rows.find(x => x.email === email && x.status === 'Active');
-  if (r) {
-    const code = code6_();
-    CacheService.getScriptCache().put('rs|' + email, JSON.stringify({ code }), CODE_MIN * 60);
-    mail_(email, APP_NAME + ': password reset code', 'Your password reset code is ' + code + '.\nIt is valid for ' + CODE_MIN + ' minutes.\n\nIf you did not ask for this, ignore this email; your password stays the same.');
-  }
-  return { sent: true };
-}
-/** Forgot password, step 2: the code and a new password. */
-function forgotVerify_(body) {
-  const email = cleanEmail_(body.email), pw = String(body.password || '');
-  if (pw.length < 8) throw new Error('The password must have at least 8 characters.');
-  takeCode_('rs|' + email, body.code);
-  setPassword_(email, pw);
-  CacheService.getScriptCache().remove('fail_' + email);
-  return { done: true };
-}
-function setPassword_(email, pw) {
-  const lock = LockService.getScriptLock(); lock.waitLock(20000);
-  try {
-    const t = readUsers_(), r = t.rows.find(x => x.email === email);
-    if (!r) throw new Error('No account with this email.');
-    const salt = newSalt_();
-    t.sh.getRange(r._r, USER_HEADERS.indexOf('Salt') + 1, 1, 2).setNumberFormat('@').setValues([[salt, pwHash_(salt, pw)]]);
-  } finally { lock.releaseLock(); }
-}
-
-/**
- * Admins: every division user (without password hashes) and the accounts in Config.local.gs (admins and shared ones),
- * which are not tied to a division and are changed only in that file.
- */
-function users_() {
-  const rows = readUsers_().rows.map(r => ({ email: r.email, circle: r.circle, division: r.division, name: r.name, desig: r.desig, phone: r.phone, status: r.status, on: r.on, last: r.last }));
-  const props = PropertiesService.getScriptProperties(), accs = local_().accounts;
-  const accounts = Object.keys(accs).map(u => ({ username: u, name: accs[u].name || u, role: accs[u].role === 'admin' ? 'admin' : 'operator', last: props.getProperty('last|' + u) || '' }));
-  return { rows, accounts, divisions: divisions_() };
-}
-function userStatus_(body, user) {
-  const email = cleanEmail_(body.email), on = !!body.active;
-  const lock = LockService.getScriptLock(); lock.waitLock(20000);
-  try {
-    const t = readUsers_(), r = t.rows.find(x => x.email === email);
-    if (!r) throw new Error('No account with this email.');
-    t.sh.getRange(r._r, USER_HEADERS.indexOf('Status') + 1).setNumberFormat('@').setValue(on ? 'Active' : 'Disabled');
-    if (on) CacheService.getScriptCache().remove('off|' + email); else CacheService.getScriptCache().put('off|' + email, '1', SESSION_HOURS * 3600);
-    log_rows_(user, [{ circle: r.circle, division: r.division, type: on ? 'User enabled' : 'User disabled', new: r.name + ' <' + email + '>' }]);
-  } finally { lock.releaseLock(); }
-  return users_();
-}
-function userPassword_(body, user) {
-  const email = cleanEmail_(body.email), pw = String(body.password || '');
-  if (pw.length < 8) throw new Error('The password must have at least 8 characters.');
-  setPassword_(email, pw);
-  const r = readUsers_().rows.find(x => x.email === email);
-  log_rows_(user, [{ circle: r.circle, division: r.division, type: 'Password set by admin', new: r.name + ' <' + email + '>' }]);
-  return { done: true };
 }
 
 /* ============================================================ helpers */
@@ -281,7 +65,7 @@ function fmt_(v) {
 function fmtTs_(v) { return isDate_(v) ? Utilities.formatDate(v, CONFIG.TZ, 'dd-MM-yyyy HH:mm') : fmt_(v); }
 // seconds too, so two saves in the same minute are still told apart
 function now_() { return Utilities.formatDate(new Date(), CONFIG.TZ, 'dd-MM-yyyy HH:mm:ss'); }
-function cadreOf_(id) { return /^BS-/.test(String(id)) ? 'BS' : 'CDL'; }
+function cadreOf_(id) { const m = /^(BS|AS|DEO)-/.exec(String(id)); return m ? m[1] : 'CDL'; }
 function err_(msg, conflict) { const e = new Error(msg); e.conflict = !!conflict; return e; }
 /** "dd-mm-yyyy HH:mm" -> sortable "yyyymmddHHmm" */
 function sortKey_(s) { const m = /^(\d{2})-(\d{2})-(\d{4})(?: (\d{2}):(\d{2}))?/.exec(s || ''); return m ? m[3] + m[2] + m[1] + (m[4] || '00') + (m[5] || '00') : ''; }
@@ -296,48 +80,29 @@ function show_(f, v) { return f === 'other' ? (v || []).join(', ') : v == null ?
  * fills the cache, and sets up the 10-minute timer that keeps the cache filled (warm).
  */
 function cdlSetup() {
-  const ss = ss_();
-  Logger.log('CDL+BS sheet: ' + ss.getUrl());
-  Logger.log('DL / CDL rows: ' + readTab_('CDL').rows.length + ' · Ban Sahayaks: ' + readTab_('BS').rows.length + ' · divisions: ' + divisions_(true).length);
-  Logger.log('Users: ' + Object.keys(local_().accounts).join(', '));
-  if (!ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === 'warm')) {
-    ScriptApp.newTrigger('warm').timeBased().everyMinutes(10).create();
-    Logger.log('Timer set: warm() runs every 10 minutes.');
-  }
+  Logger.log('CDL+BS sheet: ' + ss_().getUrl() + ' · AS+DEO sheet: ' + ss2_().getUrl());
+  Logger.log(CADRES.map(c => CADRE_NAME[c] + ': ' + readTab_(c).rows.length).join(' · ') + ' · divisions: ' + divisions_(true).length);
   buildAll_();
   Logger.log('Cache filled.');
 }
-/** Every 10 minutes (timer from cdlSetup): refills the cache before it expires, so no one waits for the whole sheet to be read. */
+/** Every 10 minutes (Core's timer): refills the cache before it expires, so no one waits for the whole sheet to be read. */
 function warm() {
   if (gzGet_('meta') && CacheService.getScriptCache().get('warm')) return;
   buildAll_();
 }
 
-/**
- * The CDL+BS sheet: SHEET_ID from Config.local.gs, else the sheet this script was opened from
- * (Extensions → Apps Script), else the one cdlSetup() created earlier, else a new one. Missing tabs are added.
- */
-let SS_ = null;   // opened once per request
+/** The CDL+BS sheet and the AS+DEO sheet, each opened once per request. Missing tabs are added. */
+let SS_ = null, SS2_ = null;
 function ss_() {
-  if (SS_) return SS_;
-  const props = PropertiesService.getScriptProperties();
-  const fixed = local_().sheetId || props.getProperty(CONFIG.PROP);
-  if (fixed) return (SS_ = tabs_(SpreadsheetApp.openById(fixed)));
-  const bound = SpreadsheetApp.getActiveSpreadsheet();
-  if (bound) { props.setProperty(CONFIG.PROP, bound.getId()); return tabs_(bound); }
-  const lock = LockService.getScriptLock(); lock.waitLock(20000);
-  try {
-    const id = props.getProperty(CONFIG.PROP);
-    if (id) return tabs_(SpreadsheetApp.openById(id));
-    const ss = SpreadsheetApp.create('CDL+BS Verification and Update');
-    props.setProperty(CONFIG.PROP, ss.getId());
-    return tabs_(ss);
-  } finally { lock.releaseLock(); }
+  return SS_ || (SS_ = tabs_(SpreadsheetApp.openById(sheetId_('CDL')), [[CONFIG.TAB.CDL, COLS.map(c => c[1])], [CONFIG.TAB.BS, COLS.map(c => c[1])],
+    [CONFIG.LOG, LOG_HEADERS], [CONFIG.CERT, CERT_HEADERS], [CONFIG.LISTS, ['Circle', 'Division']]]));
+}
+function ss2_() {
+  const cols = COLS.filter(c => c[0] !== 'orig').map(c => c[1]);   // no return to compare against
+  return SS2_ || (SS2_ = tabs_(SpreadsheetApp.openById(sheetId_('ASDEO')), [[CONFIG.TAB.AS, cols], [CONFIG.TAB.DEO, cols]]));
 }
 /** Adds any missing tab with its headings. */
-function tabs_(ss) {
-  const want = [[CONFIG.TAB.CDL, COLS.map(c => c[1])], [CONFIG.TAB.BS, COLS.map(c => c[1])], [CONFIG.LOG, LOG_HEADERS],
-    [CONFIG.CERT, CERT_HEADERS], [CONFIG.LISTS, ['Circle', 'Division']], [CONFIG.USERS, USER_HEADERS]];
+function tabs_(ss, want) {
   if (want.every(w => ss.getSheetByName(w[0]))) return ss;
   want.forEach(([name, headers]) => {
     if (ss.getSheetByName(name)) return;
@@ -348,7 +113,7 @@ function tabs_(ss) {
   });
   return ss;
 }
-function tab_(name) { return ss_().getSheetByName(name); }
+function tab_(name) { return (name === CONFIG.TAB.AS || name === CONFIG.TAB.DEO ? ss2_() : ss_()).getSheetByName(name); }
 
 /** All rows of one people tab, each with _r (its row number in the sheet). */
 function readTab_(cadre) {
@@ -410,7 +175,7 @@ function divisions_(withPeople) {
   const out = [], seen = {};
   const add = (c, d) => { if (c && d && !seen[d]) { seen[d] = 1; out.push({ circle: c, division: d }); } };
   tab_(CONFIG.LISTS).getDataRange().getValues().slice(1).forEach(r => add(fmt_(r[0]), fmt_(r[1])));
-  if (withPeople) ['CDL', 'BS'].forEach(c => readTab_(c).rows.forEach(r => add(r.circle, r.division)));
+  if (withPeople) CADRES.forEach(c => readTab_(c).rows.forEach(r => add(r.circle, r.division)));
   return out;
 }
 
@@ -453,7 +218,7 @@ function gzGet_(key) {
 function buildAll_() {
   const divs = divisions_(), seen = {}, by = {};
   divs.forEach(d => { seen[d.division] = 1; by[d.division] = []; });
-  ['CDL', 'BS'].forEach(c => readTab_(c).rows.forEach(p => {
+  CADRES.forEach(c => readTab_(c).rows.forEach(p => {
     if (!seen[p.division]) { seen[p.division] = 1; divs.push({ circle: p.circle, division: p.division }); by[p.division] = []; }
     if (p.state !== 'removed') by[p.division].push(pub_(p));
   }));
@@ -465,15 +230,16 @@ function buildAll_() {
 }
 /** A division's line of the summary, from its people (both cadres). */
 function summary_(rows) {
-  const o = { CDL: count0_(), BS: count0_(), last: { CDL: '', BS: '' }, duty: { CDL: {}, BS: {} }, blank: { CDL: 0, BS: 0 }, pending: 0 };
+  const o = { last: {}, duty: {}, blank: {}, pending: 0 };
+  CADRES.forEach(c => { o[c] = count0_(); o.last[c] = ''; o.duty[c] = {}; o.blank[c] = 0; });
   rows.forEach(p => {
-    const c = p.cadre === 'BS' ? 'BS' : 'CDL', s = status_(p); if (s === 'removed') return;
+    const c = CADRES.indexOf(p.cadre) >= 0 ? p.cadre : 'CDL', s = status_(p); if (s === 'removed') return;
     const k = o[c]; k.all++; k[s]++; if (p.state === 'add-pending') k.added++;
     if (p.state === 'add-pending' || p.state === 'remove-pending') o.pending++;
     if (s !== 'remove') { if (p.duty) o.duty[c][p.duty] = (o.duty[c][p.duty] || 0) + 1; else o.blank[c]++; }
     if (sortKey_(p.updOn) > sortKey_(o.last[c])) o.last[c] = p.updOn;
   });
-  ['CDL', 'BS'].forEach(c => { o[c].active = o[c].all - o[c].remove; });
+  CADRES.forEach(c => { o[c].active = o[c].all - o[c].remove; });
   return o;
 }
 /** After a change: puts the changed people into the cached division and updates its line of the summary. */
@@ -497,7 +263,7 @@ function refreshCerts_() { const m = gzGet_('meta'); if (m) { m.certs = certs_()
 
 const blank_ = v => v == null || (Array.isArray(v) ? !v.length : !String(v).trim());
 function missing_(p) {
-  const m = REQUIRED[p.cadre === 'BS' ? 'BS' : 'CDL'].filter(f => blank_(p[f]));
+  const m = (REQUIRED[p.cadre] || REQUIRED.CDL).filter(f => blank_(p[f]));
   if (p.duty === 'Others' && (blank_(p.details) || VAGUE.test(p.details) || String(p.details).trim().length < 10)) m.push('details');
   return m;
 }
@@ -515,15 +281,19 @@ function status_(p) {
 function meta_(body, user) {
   const m = gzGet_('meta') || buildAll_().m;
   // state totals, added up from the divisions' lines
-  const duty = { CDL: {}, BS: {} }, blank = { CDL: 0, BS: 0 };
+  const duty = {}, blank = {};
   let pending = 0;
+  CADRES.forEach(c => { duty[c] = {}; blank[c] = 0; });
   m.divisions.forEach(d => {
     pending += d.pending || 0;
-    ['CDL', 'BS'].forEach(c => { blank[c] += d.blank[c]; Object.keys(d.duty[c]).forEach(k => { duty[c][k] = (duty[c][k] || 0) + d.duty[c][k]; }); });
+    CADRES.forEach(c => { blank[c] += (d.blank[c] || 0); Object.keys(d.duty[c] || {}).forEach(k => { duty[c][k] = (duty[c][k] || 0) + d.duty[c][k]; }); });
   });
   const out = { user, certs: m.certs, duty, blank, pending,
-    divisions: m.divisions.map(d => ({ circle: d.circle, division: d.division, CDL: d.CDL, BS: d.BS, last: d.last })) };
-  if (user.isAdmin) { out.userCounts = {}; readUsers_().rows.forEach(r => { if (r.status === 'Active') out.userCounts[r.division] = (out.userCounts[r.division] || 0) + 1; }); }
+    divisions: m.divisions.map(d => { const o = { circle: d.circle, division: d.division, last: d.last }; CADRES.forEach(c => o[c] = d[c] || count0_()); return o; }) };
+  if (user.isAdmin) {   // division users of AranyaHR (Core.gs), counted under this sheet's division names
+    out.userCounts = {};
+    readUsers_().rows.forEach(r => { if (r.status === 'Active' && (r.level || 'Division') === 'Division') { const d = nameIn_('cdl', r.circle, r.division).division; out.userCounts[d] = (out.userCounts[d] || 0) + 1; } });
+  }
   return out;
 }
 function count0_() { return { all: 0, missing: 0, ready: 0, problem: 0, confirmed: 0, remove: 0, added: 0, changed: 0, active: 0 }; }
@@ -534,7 +304,7 @@ function load_(body) {
   if (!division) throw new Error('Choose a division.');
   const rows = gzGet_('div|' + division) || buildAll_().by[division] || [];
   const certs = certs_(), mine = {};
-  ['CDL', 'BS'].forEach(c => { if (certs[division + '|' + c]) mine[c] = certs[division + '|' + c]; });
+  CADRES.forEach(c => { if (certs[division + '|' + c]) mine[c] = certs[division + '|' + c]; });
   return { division, rows, certs: mine };
 }
 
@@ -590,7 +360,7 @@ function confirm_(body, user) {
   try {
     const out = [], log = [], divs = {}, certs = certs_();
     let done = 0, skipped = 0;
-    ['CDL', 'BS'].forEach(cadre => {
+    CADRES.forEach(cadre => {
       const mine = ids.filter(id => cadreOf_(id) === cadre); if (!mine.length) return;
       const t = readTab_(cadre), changed = [];
       mine.forEach(id => {
@@ -657,11 +427,11 @@ function resolveFlag_(body, user) {
   } finally { lock.releaseLock(); }
 }
 
-/** A DL / CDL not in the list waits for the admin; Ban Sahayaks count straight away. The website picks the ID. */
+/** A DL / CDL not in the list waits for the admin; Ban Sahayaks, Aranya Sathis and DEOs count straight away. The website picks the ID. */
 function add_(body, user) {
-  const d = body.person || {}, cadre = d.cadre === 'BS' ? 'BS' : 'CDL';
+  const d = body.person || {}, cadre = CADRES.indexOf(d.cadre) >= 0 ? d.cadre : 'CDL';
   const id = String(d.id || '');
-  if (!(cadre === 'BS' ? /^BS-[0-9A-F]{8}$/ : /^NEW-[0-9A-F]{8}$/).test(id)) throw new Error('Bad ID for a new person.');
+  if (!new RegExp('^' + (cadre === 'CDL' ? 'NEW' : cadre) + '-[0-9A-F]{8}$').test(id)) throw new Error('Bad ID for a new person.');
   const name = String(d.name || '').replace(/\s+/g, ' ').trim();
   if (name.length < 3) throw new Error('Write the name.');
   const div = divisions_().find(x => x.division === d.division);
@@ -672,20 +442,20 @@ function add_(body, user) {
     if (locked_(div.division, cadre)) throw new Error('This list is certified and locked.');
     const t = findPerson_(id);
     if (t.rows.length) return { rows: [pub_(t.rows[0])] };   // sent twice
-    const p = { id, cadre, circle: div.circle, division: div.division, name, ver: '', state: cadre === 'BS' ? 'active' : 'add-pending', flag: '', removal: null, orig: null,
+    const p = { id, cadre, circle: div.circle, division: div.division, name, ver: '', state: cadre === 'CDL' ? 'add-pending' : 'active', flag: '', removal: null, orig: null,
       updOn: now_(), updBy: who_(user) };
     EDITABLE.forEach(f => { if (f !== 'name') p[f] = f === 'other' ? (d.other || []).filter(x => DUTIES.indexOf(x) >= 0) : f === 'pay' ? (d.pay == null || d.pay === '' ? null : Number(d.pay)) : String(d[f] || '').trim(); });
     if (cadre === 'BS') Object.assign(p, { mode: 'Direct', agency: '', pay: BS_PAY });
     writeRows_(t, [p]);
     refreshCache_(p.division, [p]);
-    log_rows_(user, [{ p, type: 'Added', new: cadre === 'BS' ? 'Ban Sahayak' : 'New person' }]);
+    log_rows_(user, [{ p, type: 'Added', new: cadre === 'CDL' ? 'New person' : CADRE_NAME[cadre] }]);
     return { rows: [pub_(p)] };
   } finally { lock.releaseLock(); }
 }
 
 /** The DFO certifies one cadre's list of a division once everyone working is verified. */
 function certify_(body, user) {
-  const division = String(body.division || ''), cadre = body.cadre === 'BS' ? 'BS' : 'CDL';
+  const division = String(body.division || ''), cadre = CADRES.indexOf(body.cadre) >= 0 ? body.cadre : 'CDL';
   const name = String(body.name || '').trim(), desig = String(body.desig || '').trim();
   if (!name || !desig) throw new Error('Write the name and designation of the DFO.');
   mayEdit_(user, division);
@@ -704,7 +474,7 @@ function certify_(body, user) {
   } finally { lock.releaseLock(); }
 }
 function reopen_(body, user) {
-  const division = String(body.division || ''), cadre = body.cadre === 'BS' ? 'BS' : 'CDL';
+  const division = String(body.division || ''), cadre = CADRES.indexOf(body.cadre) >= 0 ? body.cadre : 'CDL';
   const lock = LockService.getScriptLock(); lock.waitLock(25000);
   try {
     const sh = tab_(CONFIG.CERT), v = sh.getDataRange().getValues();
@@ -718,7 +488,7 @@ function reopen_(body, user) {
 /** Admins: new people and removals waiting for a decision. */
 function pending_() {
   const rows = [];
-  ['CDL', 'BS'].forEach(c => readTab_(c).rows.forEach(p => { if (p.state === 'add-pending' || p.state === 'remove-pending') rows.push(pub_(p)); }));
+  CADRES.forEach(c => readTab_(c).rows.forEach(p => { if (p.state === 'add-pending' || p.state === 'remove-pending') rows.push(pub_(p)); }));
   return { rows };
 }
 function decide_(body, user) {
@@ -735,7 +505,35 @@ function log_() {
   const sh = tab_(CONFIG.LOG), last = sh.getLastRow(), n = Math.min(1000, last - 1);
   if (n < 1) return { rows: [], total: 0 };
   const v = sh.getRange(last - n + 1, 1, n, LOG_HEADERS.length).getValues().reverse();
-  const cadre = { 'DL / CDL': 'CDL', 'Ban Sahayak': 'BS' };
+  const cadre = CADRES.reduce((a, c) => (a[CADRE_NAME[c]] = c, a), {});
   return { total: last - 1, rows: v.map(x => ({ on: fmtTs_(x[0]), username: fmt_(x[1]), by: fmt_(x[2]), circle: fmt_(x[3]), division: fmt_(x[4]), cadre: cadre[fmt_(x[5])] || '',
     id: fmt_(x[6]), name: fmt_(x[7]), type: fmt_(x[8]), field: fmt_(x[9]), old: fmt_(x[10]), new: fmt_(x[11]) })) };
 }
+
+/* ============================================================ for Core: home page, overview, divisions, users moved */
+
+function people_(circle, division) {
+  return load_({ division }).rows.filter(p => p.state !== 'removed').map(p => ({ cadre: p.cadre, id: p.id, name: p.name,
+    desig: CADRE_NAME[p.cadre] || '', range: p.range === HQ ? 'Div HQ' : p.range, place: p.beat || p.placeName || '', status: status_(p) }));
+}
+function counts_() {
+  const m = gzGet_('meta') || buildAll_().m, out = [];
+  m.divisions.forEach(d => CADRES.forEach(c => { const k = d[c]; if (k && k.all) out.push({ circle: d.circle, division: d.division, cadre: c, total: k.active, done: k.confirmed }); }));
+  return out;
+}
+/** The users of the earlier CDL+BS app (its Users tab), for hrSetup to move to AranyaHR. */
+function oldUsers_() {
+  const sh = ss_().getSheetByName(CONFIG.USERS); if (!sh) return [];
+  const v = sh.getDataRange().getValues(), head = (v[0] || []).map(h => String(h).trim()), at = k => head.indexOf(k);
+  const keys = ['email', 'circle', 'division', 'name', 'desig', 'phone', 'status', 'on', 'last', 'salt', 'hash'];
+  return v.slice(1).map(r => { const o = {}; keys.forEach((k, j) => { const i = at(USER_HEADERS[j]); o[k] = i < 0 ? '' : fmtTs_(r[i]); }); o.email = o.email.toLowerCase(); return o; }).filter(o => o.email);
+}
+
+return {
+  actions: { meta: meta_, load: load_, update: update_, confirm: confirm_, unconfirm: unconfirm_, notWorking: notWorking_, undoRemoval: undoRemoval_,
+    resolveFlag: resolveFlag_, add: add_, certify: certify_, pending: pending_, decide: decide_, reopen: reopen_, log: log_ },
+  admin: ['pending', 'decide', 'reopen', 'log'],
+  writes: ['update', 'confirm', 'unconfirm', 'notWorking', 'undoRemoval', 'resolveFlag', 'add', 'certify'],
+  people: people_, counts: counts_, divisions: () => divisions_(), oldUsers: oldUsers_, setup: cdlSetup, warm,
+};
+})();

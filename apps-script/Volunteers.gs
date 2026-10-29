@@ -1,14 +1,15 @@
 /**
- * Forest Volunteers (FV) — JSON API for the GitHub-hosted FV app.
+ * Forest Volunteers (FV) — the FV API, unchanged inside this wrapper. Sign-in and the division check are in Core.gs.
  * Each division keeps the list of Forest Volunteers it has engaged. Saves go straight in (no approval);
  * every added, changed or removed value is written to the Change Log with who saved it.
- * Data: its own Google Sheet "Forest Volunteers", created by fvSetup() — tabs Volunteers, Change Log, Lists.
- * Auth: username/password (Config.local.gs, not in GitHub); the server issues a session token kept in the script cache.
- * Deploy: Web app · Execute as: Me · Who has access: Anyone.
+ * Data: the "AranyaHR · FV" sheet — tabs Volunteers, Change Log, Lists.
  */
+const Volunteers = (() => {
+// the same services, with this module's own key prefix (Core.gs); looked up when used, so the order of the files does not matter
+const CacheService = { getScriptCache: () => prefixedCache_('fv:').getScriptCache() };
+const PropertiesService = { getScriptProperties: () => prefixedProps_('fv:').getScriptProperties() };
 
-const CONFIG = { TZ: 'Asia/Kolkata', PROP: 'FV_SHEET_ID', TAB: 'Volunteers', LOG: 'Change Log', LISTS: 'Lists' };
-const SESSION_HOURS = 6, MAX_FAILS = 5, LOCK_MIN = 15;
+const CONFIG = { TZ: 'Asia/Kolkata', TAB: 'Volunteers', LOG: 'Change Log', LISTS: 'Lists' };
 
 // [key, sheet header]; the order is the Volunteers tab's column order
 const COLS = [
@@ -50,65 +51,6 @@ const SEED_LISTS = [
   ['Soil Con (N)', 'CF, SC', ['Circle HQ', 'Kurseong SC', 'Jalpaiguri SC']],
 ];
 
-function local_() {
-  const L = (typeof LOCAL_CONFIG !== 'undefined') ? LOCAL_CONFIG : {};
-  return { accounts: L.ACCOUNTS || {}, sheetId: L.SHEET_ID || '' };
-}
-
-/* ============================================================ HTTP */
-
-function doGet() { return json_({ ok: true, app: 'FV API', time: now_() }); }
-
-function doPost(e) {
-  try {
-    const body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
-    if (body.action === 'login') return json_({ ok: true, data: login_(body) });
-    if (body.action === 'logout') { logout_(body.token); return json_({ ok: true, data: {} }); }
-    const user = authenticate_(body.token);
-    const handlers = { meta: meta_, load: load_, save: save_, admin: admin_ };
-    const fn = handlers[body.action];
-    if (!fn) throw new Error('Unknown action: ' + body.action);
-    if (body.action === 'admin' && !user.isAdmin) throw new Error('Only administrators can do this.');
-    return json_({ ok: true, data: fn(body, user) });
-  } catch (err) {
-    return json_({ ok: false, error: String(err && err.message || err) });
-  }
-}
-function json_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
-
-/* ============================================================ auth */
-
-function sha256hex_(s) {
-  return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, s, Utilities.Charset.UTF_8)
-    .map(b => ((b + 256) % 256).toString(16).padStart(2, '0')).join('');
-}
-
-/** {username, password} -> {token, user}. Wrong attempts lock the username for LOCK_MIN minutes. */
-function login_(body) {
-  const cache = CacheService.getScriptCache();
-  const u = String(body.username || '').trim().toLowerCase(), pw = String(body.password || '');
-  if (!u || !pw) throw new Error('Enter your username and password.');
-  const failKey = 'fail_' + u, fails = Number(cache.get(failKey) || 0);
-  if (fails >= MAX_FAILS) throw new Error('Too many wrong attempts. Try again after ' + LOCK_MIN + ' minutes.');
-  const acc = local_().accounts[u];
-  if (!acc || sha256hex_(acc.salt + pw) !== acc.hash) {
-    cache.put(failKey, String(fails + 1), LOCK_MIN * 60);
-    throw new Error('Wrong username or password.');
-  }
-  cache.remove(failKey);
-  const token = 'fv.' + Utilities.getUuid() + Utilities.getUuid().slice(0, 8);
-  const user = { name: acc.name || u, isAdmin: acc.role === 'admin', username: u };
-  cache.put('sess_' + token, JSON.stringify(user), SESSION_HOURS * 3600);
-  return { token, user };
-}
-function logout_(token) { if (token) CacheService.getScriptCache().remove('sess_' + token); }
-function authenticate_(token) {
-  if (!token || String(token).indexOf('fv.') !== 0) throw new Error('Please sign in.');
-  const s = CacheService.getScriptCache().get('sess_' + token);
-  if (!s) throw new Error('Your sign-in has expired. Please sign in again.');
-  return JSON.parse(s);
-}
-
 /* ============================================================ helpers */
 
 function isDate_(v) { return Object.prototype.toString.call(v) === '[object Date]'; }
@@ -132,33 +74,16 @@ function parseDate_(s) {
 
 /* ============================================================ sheet */
 
-/** Run once from the editor: creates the "Forest Volunteers" sheet (if not made yet) and logs its link. */
+/** Checks the sheet and logs its link (run by hrSetup). */
 function fvSetup() {
   const ss = ss_();
-  Logger.log('Forest Volunteers sheet: ' + ss.getUrl());
+  Logger.log('FV sheet: ' + ss.getUrl());
   Logger.log('Circles: ' + circles_().length + ' · volunteers so far: ' + readAll_().length);
-  Logger.log('Users: ' + Object.keys(local_().accounts).join(', '));
 }
 
-/**
- * The Forest Volunteers sheet: SHEET_ID from Config.local.gs, else the sheet this script was opened from
- * (Extensions → Apps Script), else the one fvSetup() created earlier, else a new one. Missing tabs are added.
- */
-function ss_() {
-  const props = PropertiesService.getScriptProperties();
-  const fixed = local_().sheetId || props.getProperty(CONFIG.PROP);
-  if (fixed) return tabs_(SpreadsheetApp.openById(fixed));
-  const bound = SpreadsheetApp.getActiveSpreadsheet();
-  if (bound) { props.setProperty(CONFIG.PROP, bound.getId()); return tabs_(bound); }
-  const lock = LockService.getScriptLock(); lock.waitLock(20000);
-  try {
-    const id = props.getProperty(CONFIG.PROP);
-    if (id) return tabs_(SpreadsheetApp.openById(id));
-    const ss = SpreadsheetApp.create('Forest Volunteers');
-    props.setProperty(CONFIG.PROP, ss.getId());
-    return tabs_(ss);
-  } finally { lock.releaseLock(); }
-}
+/** The FV sheet, opened once per request. Missing tabs are added. */
+let SS_ = null;
+function ss_() { return SS_ || (SS_ = tabs_(SpreadsheetApp.openById(sheetId_('FV')))); }
 /** Adds the Volunteers, Change Log and Lists tabs if the sheet does not have them yet. */
 function tabs_(ss) {
   if (ss.getSheetByName(CONFIG.TAB) && ss.getSheetByName(CONFIG.LOG) && ss.getSheetByName(CONFIG.LISTS)) return ss;
@@ -382,3 +307,26 @@ function admin_() {
   }
   return { rows: readAll_(), log, logTotal: Math.max(0, v.length - 1), sheetUrl: ss_().getUrl() };
 }
+
+/* ============================================================ for Core: home page, overview, divisions */
+
+function people_(circle, division) {
+  return readAll_().filter(r => r.circle === circle && r.division === division).map(r => ({ cadre: 'FV', id: r.id, name: r.name, desig: 'Forest Volunteer',
+    range: r.placeType === 'Range' ? r.placeName : 'Div HQ', place: r.placeSub || '', status: complete_(r) ? 'added' : 'missing' }));
+}
+function counts_() {
+  const out = {};
+  readAll_().forEach(r => { const k = r.circle + '|' + r.division, x = out[k] = out[k] || { circle: r.circle, division: r.division, cadre: 'FV', total: 0, done: 0 }; x.total++; if (complete_(r)) x.done++; });
+  return Object.keys(out).map(k => out[k]);
+}
+function divisions_() { const out = []; circles_().forEach(c => c.divisions.forEach(d => out.push({ circle: c.circle, division: d }))); return out; }
+
+return {
+  actions: { meta: meta_, load: load_, save: save_, admin: admin_ },
+  admin: ['admin'], writes: ['save'],
+  people: people_, counts: counts_, divisions: divisions_, setup: fvSetup, warm: () => {}, convertPlaces,
+};
+})();
+
+/** Run once from the editor after updating: converts places saved in the earlier format (see Volunteers.gs). */
+function convertPlaces() { Volunteers.convertPlaces(); }

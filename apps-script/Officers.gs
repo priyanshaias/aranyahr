@@ -1,10 +1,11 @@
 /**
- * UPMC2 — JSON API for the GitHub-hosted UPMC2 app.
- * Data: the Unified PMC Google Sheet (tabs FR, DFR, FG-HFG, Change Log, Lists).
- * Auth: username/password login; the server issues a session token kept in the script cache.
- * Private settings (password hashes) live in Config.local.gs, which is NOT in the public repo.
- * Deploy: Web app · Execute as: Me · Who has access: Anyone.
+ * Officers (FR, DR/Fr, FG/HFG) — the UPMC2 API, unchanged inside this wrapper. Sign-in and the division check are in Core.gs.
+ * Data: the "AranyaHR · FR DFR FG" sheet (tabs FR, DFR, FG-HFG, Change Log, Lists).
  */
+const Officers = (() => {
+// the same services, with this module's own key prefix (Core.gs); looked up when used, so the order of the files does not matter
+const CacheService = { getScriptCache: () => prefixedCache_('off:').getScriptCache() };
+const PropertiesService = { getScriptProperties: () => prefixedProps_('off:').getScriptProperties() };
 
 const CONFIG = {
   TZ: 'Asia/Kolkata',
@@ -39,90 +40,16 @@ function missingFor_(d) {
   PAIRS.forEach(([a, b]) => { if (has(a) && has(b) && !NONE_.test(String(d[a] || '').trim()) && blank(b)) out.push(b); });
   return out;
 }
-const SESSION_HOURS = 6;          // password sessions last this long (Apps Script cache maximum)
-const MAX_FAILS = 5, LOCK_MIN = 15;
-
-/** Private settings from Config.local.gs (read lazily so file order does not matter). */
-function local_() {
-  const L = (typeof LOCAL_CONFIG !== 'undefined') ? LOCAL_CONFIG : {};
-  return { accounts: L.ACCOUNTS || {}, sheetId: L.SHEET_ID || '' };
-}
-
-/* ============================================================ HTTP */
-
-function doGet() {
-  return json_({ ok: true, app: 'UPMC2 API', time: now_() });
-}
-
-function doPost(e) {
-  let body = {};
-  try {
-    body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
-    if (body.action === 'login') return json_({ ok: true, data: login_(body) });
-    if (body.action === 'logout') { logout_(body.token); return json_({ ok: true, data: {} }); }
-    const user = authenticate_(body.token);
-    const handlers = {
-      meta: meta_, division: division_, verify: verify_, submit: submit_, addOfficer: addOfficer_, search: search_, history: history_,
-      adminSummary: adminSummary_, adminChanges: adminChanges_, adminQueue: adminQueue_, adminDecide: adminDecide_, adminRefresh: adminRefresh_, adminData: adminData_,
-    };
-    const fn = handlers[body.action];
-    if (!fn) throw new Error('Unknown action: ' + body.action);
-    if (String(body.action).indexOf('admin') === 0 && !user.isAdmin) throw new Error('Only administrators can do this.');
-    return json_({ ok: true, data: fn(body, user) });
-  } catch (err) {
-    return json_({ ok: false, error: String(err && err.message || err) });
-  }
-}
-
-function json_(o) {
-  return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
-}
-
-/* ============================================================ auth */
-
-/* ---------- username / password ---------- */
-
-function sha256hex_(s) {
-  return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, s, Utilities.Charset.UTF_8)
-    .map(b => ((b + 256) % 256).toString(16).padStart(2, '0')).join('');
-}
-
-/** {username, password} -> {token, user}. Wrong attempts lock the username for LOCK_MIN minutes. */
-function login_(body) {
-  const cache = CacheService.getScriptCache();
-  const u = String(body.username || '').trim().toLowerCase(), pw = String(body.password || '');
-  if (!u || !pw) throw new Error('Enter your username and password.');
-  const failKey = 'fail_' + u, fails = Number(cache.get(failKey) || 0);
-  if (fails >= MAX_FAILS) throw new Error('Too many wrong attempts. Try again after ' + LOCK_MIN + ' minutes.');
-  const acc = local_().accounts[u];
-  if (!acc || sha256hex_(acc.salt + pw) !== acc.hash) {
-    cache.put(failKey, String(fails + 1), LOCK_MIN * 60);
-    throw new Error('Wrong username or password.');
-  }
-  cache.remove(failKey);
-  const token = 'pw.' + Utilities.getUuid() + Utilities.getUuid().slice(0, 8);
-  const user = { email: u + ' (password login)', name: acc.name || u, isAdmin: acc.role === 'admin', username: u };
-  cache.put('sess_' + token, JSON.stringify(user), SESSION_HOURS * 3600);
-  return { token, user };
-}
-function logout_(token) { if (token && String(token).indexOf('pw.') === 0) CacheService.getScriptCache().remove('sess_' + token); }
-
-/** Returns {email, name, isAdmin} for a valid password session. */
-function authenticate_(token) {
-  if (!token || String(token).indexOf('pw.') !== 0) throw new Error('Please sign in.');
-  const s = CacheService.getScriptCache().get('sess_' + token);
-  if (!s) throw new Error('Your sign-in has expired. Please sign in again.');
-  return JSON.parse(s);
-}
 
 /* ============================================================ sheet helpers */
 
-/** The Unified PMC sheet: by ID (standalone script) or the sheet this script is attached to. */
-function ss_() {
-  const id = local_().sheetId;
-  const ss = id ? SpreadsheetApp.openById(id) : SpreadsheetApp.getActiveSpreadsheet();
-  if (!ss) throw new Error('No spreadsheet. Put SHEET_ID in Config.local.gs.');
-  return ss;
+/** The FR DFR FG sheet, opened once per request. */
+let SS_ = null;
+function ss_() { return SS_ || (SS_ = SpreadsheetApp.openById(sheetId_('OFF'))); }
+/** A division user may change only the officers of their own division (Core passes their division in this sheet's names). */
+function mayEdit_(user, rec) {
+  if (user.isAdmin || !user.division || (rec['Circle'] === user.circle && rec['Division'] === user.division)) return;
+  throw new Error('You can change only ' + user.division + '. ' + (rec['Name'] || 'This officer') + ' is in ' + rec['Division'] + '.');
 }
 function sheet_(name) {
   const sh = ss_().getSheetByName(name);
@@ -362,6 +289,7 @@ function verify_(body, user) {
   const lock = LockService.getScriptLock(); lock.waitLock(30000);
   try {
     const L = locate_(code, body.id, body.circle, body.division), rec = L.rec, col = h => L.headers.indexOf(h) + 1;
+    mayEdit_(user, rec);
     if (posting && (rec['Verification'] === VERIFIED || rec['Verification'] === 'Corrected'))
       return { level: 'all', unchanged: true, verification: rec['Verification'], verifiedBy: rec['Last Updated By'], verifiedOn: rec['Last Updated On'] };
     const miss = missingFor_(rec);
@@ -411,6 +339,7 @@ function submit_(body, user) {
   const lock = LockService.getScriptLock(); lock.waitLock(30000);
   try {
     const L = locate_(code, body.id, body.circle, body.division), rec = L.rec;
+    mayEdit_(user, rec);
     const op = body.operator || {};
     const sub = 'S' + Utilities.formatDate(new Date(), CONFIG.TZ, 'yyMMdd-HHmmss') + '-' + Math.floor(Math.random() * 900 + 100);
     const rows = [];
@@ -454,6 +383,7 @@ function addOfficer_(body, user) {
   if (!/^[A-Za-z0-9-]{4,20}$/.test(id)) throw new Error('Enter a valid HRMS ID.');
   if (!String(raw['Name'] || '').trim()) throw new Error('Enter the officer’s name.');
   if (!raw['Circle'] || !raw['Division']) throw new Error('Circle and division are missing.');
+  mayEdit_(user, raw);
   headers.forEach(h => {
     if (raw[h] === undefined || raw[h] === null || raw[h] === '') return;
     if (h === CONFIG.KEY) { data[h] = id; return; }
@@ -734,7 +664,37 @@ function setup() {
   listValue_('Deceased/Retired/Absconding etc', 'Promoted'); statusValidation_();
   const all = buildAll_(); Logger.log('Cache ready: ' + Object.keys(all.divs).length + ' divisions');
   Object.keys(CADRES).forEach(c => Logger.log(c + ': ' + readSheet_(c).rows.length + ' officers'));
-  const L = local_();
-  Logger.log('Password users: ' + Object.keys(L.accounts).map(u => u + ' (' + L.accounts[u].role + ')').join(', '));
-  if (typeof LOCAL_CONFIG === 'undefined') Logger.log('WARNING: Config.local.gs is missing. Add it as a second script file.');
 }
+
+/* ============================================================ for Core: home page, overview, divisions */
+
+function allDivs_() {
+  const meta = getMeta_(), keys = Object.keys(meta.counts).filter(k => meta.counts[k].total).map(k => 'div|' + k);
+  const got = CacheService.getScriptCache().getAll(keys);
+  if (Object.keys(got).length < keys.length) return buildAll_().divs;
+  const divs = {}; keys.forEach(k => divs[k] = ungz_(got[k])); return divs;
+}
+function people_(circle, division) {
+  return getDiv_(circle, division).officers.filter(o => !o.incoming).map(o => ({ cadre: o.cadre, id: o.id, name: o.data['Name'] || '',
+    desig: o.data['Designation'] || '', range: o.data['Present Range / Office'] || '', place: o.data['Present Beat'] || '', status: o.status }));
+}
+function counts_() {
+  const divs = allDivs_(), out = {};
+  Object.keys(divs).forEach(k => divs[k].officers.forEach(o => {
+    if (o.incoming) return;
+    const c = o.data['Circle'], d = o.data['Division'], key = c + '|' + d + '|' + o.cadre;
+    const x = out[key] = out[key] || { circle: c, division: d, cadre: o.cadre, total: 0, done: 0 };
+    x.total++; if (o.status === 'verified') x.done++;
+  }));
+  return Object.keys(out).map(k => out[k]);
+}
+function divisions_() { const out = []; readLists_().circles.forEach(c => c.divisions.forEach(d => out.push({ circle: c.circle, division: d }))); return out; }
+
+return {
+  actions: { meta: meta_, division: division_, verify: verify_, submit: submit_, addOfficer: addOfficer_, search: search_, history: history_,
+    adminSummary: adminSummary_, adminChanges: adminChanges_, adminQueue: adminQueue_, adminDecide: adminDecide_, adminRefresh: adminRefresh_, adminData: adminData_ },
+  admin: ['adminSummary', 'adminChanges', 'adminQueue', 'adminDecide', 'adminRefresh', 'adminData'],
+  writes: ['verify', 'submit', 'addOfficer'],
+  people: people_, counts: counts_, divisions: divisions_, setup, warm: keepWarm,
+};
+})();
