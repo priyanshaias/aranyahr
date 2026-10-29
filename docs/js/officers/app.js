@@ -1,0 +1,932 @@
+// UPMC2 — screens and interactions.
+(function () {
+  const API = window.UPMC_API, FL = window.UPMC_FIELDS, PDF = window.UPMC_PDF;
+  const $ = s => document.querySelector(s);
+  const app = $('#app');
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const icon = {
+    check: '<svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>',
+    down: '<svg viewBox="0 0 24 24"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 21h16"/></svg>',
+    edit: '<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4Z"/></svg>',
+    search: '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
+    back: '<svg viewBox="0 0 24 24"><path d="M15 18 9 12l6-6"/></svg>',
+    send: '<svg viewBox="0 0 24 24"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7Z"/></svg>',
+  };
+  const S = { meta: null, div: null, filter: 'all', cadre: 'all', q: '', open: null, editSecs: new Set(), edits: {} };
+  const STATUS_TXT = { verified: 'All details verified', partial: 'Posting verified · rest pending', pending: 'Awaiting approval', unverified: 'Not verified' };
+  const V_ALL = 'Verified - All correct', V_POSTING = 'Verified - Posting and home district';
+  const fullyVerified = d => d.Verification === V_ALL || d.Verification === 'Corrected';
+  const postingVerified = d => fullyVerified(d) || d.Verification === V_POSTING;
+
+  /* ---------------- small helpers ---------------- */
+  const HELP = { name: 'Sudipta Kundu', office: 'Aranya Bhawan', phone: '+91 70442 30806', tel: '+917044230806' };
+  function toast(msg, err) { const t = $('#toast'); t.textContent = msg; t.className = 'toast on' + (err ? ' err' : ''); clearTimeout(t._t); t._t = setTimeout(() => t.className = 'toast', 3800); }
+  /* ---------- loading animation: a tree that draws itself, a moving bar, rotating messages and tips ---------- */
+  const TREE = `<svg class="tree" viewBox="0 0 64 64" aria-hidden="true">
+    <path class="canopy" d="M32 7c-8 0-14 6-14 13.5 0 1.6.3 3 .8 4.4C14.2 27 11 31.3 11 36.5 11 43.4 16.8 49 24 49h16c7.2 0 13-5.6 13-12.5 0-5.2-3.2-9.5-7.8-11.6.5-1.4.8-2.8.8-4.4C46 13 40 7 32 7Z"/>
+    <path class="trunk" d="M32 57V30M32 42l-7-6M32 37l6-5"/>
+    <path class="ground" d="M17 57h30"/></svg>`;
+  const TIPS = [
+    'Tip: the “Posting and home district” box is the most important part. Check it first.',
+    'Tip: the download icon on each card gives that officer’s information sheet as a PDF.',
+    'Tip: use the “Not verified” filter to see who is left in your division.',
+    'Tip: changes you make go to the administrator for approval before they count.',
+    'Tip: a solid blue badge means all details are verified; an outline tick means only the posting and home district are.',
+  ];
+  const STEPS = {
+    circles: ['Opening the PMC register…', 'Counting officers in every circle…', 'Checking what has been verified…', 'Almost there…'],
+    division: ['Fetching the officers…', 'Reading posting details…', 'Arranging cards by cadre…', 'Almost there…'],
+    save: ['Saving…', 'Writing to the register…', 'Almost done…'],
+    pdf: ['Preparing the information sheets…', 'Laying out each page…', 'Adding the emblem and signatures…'],
+    admin: ['Collecting changes sent by divisions…', 'Comparing with the register…', 'Almost there…'],
+  };
+  function loaderHtml(kind, title) {
+    return `<div class="loader" data-kind="${kind}">${TREE}
+      <b class="ld-title">${esc(title || STEPS[kind][0])}</b>
+      <div class="ibar"><i></i></div>
+      <p class="ld-step">${esc(STEPS[kind][1] || '')}</p>
+      <p class="ld-tip">${esc(TIPS[Math.floor(Math.random() * TIPS.length)])}</p>
+      <p class="ld-slow faint"></p>
+      <p class="ld-help">Need help? ${HELP.name}, ${HELP.office} · <a href="tel:${HELP.tel}">${HELP.phone}</a> · <a href="#" data-help>How to use</a></p></div>`;
+  }
+  /** Rotates the messages of every .loader on screen; stops by itself when the loader is gone. */
+  function animateLoader(root) {
+    const el = root.querySelector('.loader'); if (!el) return;
+    const steps = STEPS[el.dataset.kind] || STEPS.division, t0 = Date.now();
+    let i = 1, tip = Math.floor(Math.random() * TIPS.length);
+    const timer = setInterval(() => {
+      if (!document.body.contains(el)) return clearInterval(timer);
+      const secs = (Date.now() - t0) / 1000;
+      const st = el.querySelector('.ld-step');
+      if (i < steps.length - 1 || secs > 9) { i = Math.min(i + 1, steps.length - 1); swapText(st, steps[i]); }
+      if (Math.round(secs) % 6 === 0) { tip = (tip + 1) % TIPS.length; swapText(el.querySelector('.ld-tip'), TIPS[tip]); }
+      if (secs > 8) el.querySelector('.ld-slow').textContent = 'The first load of the day can take up to 20 seconds. Thank you for waiting.';
+    }, 2600);
+  }
+  function swapText(node, text) {
+    if (!node || node.textContent === text) return;
+    node.classList.add('out');
+    setTimeout(() => { node.textContent = text; node.classList.remove('out'); }, 220);
+  }
+  function busy(text, withBar, kind) {
+    const el = document.createElement('div'); el.className = 'busy';
+    el.innerHTML = `<div class="box">${loaderHtml(kind || (withBar ? 'pdf' : 'save'), text)}${withBar ? '<div class="track"><i></i></div>' : ''}</div>`;
+    document.body.appendChild(el);
+    animateLoader(el);
+    return { set: p => { const i = el.querySelector('.track i'); if (i) i.style.width = Math.round(p * 100) + '%'; }, done: () => el.remove() };
+  }
+  function op() { try { return JSON.parse(localStorage.getItem('upmc_operator') || 'null'); } catch (e) { return null; } }
+  function go(h) { location.hash = h; }
+  async function guard(fn) {
+    try { return await fn(); }
+    catch (e) { if (e.auth) { toast(e.message, true); go('#/'); render(); } else toast(e.message || 'Something went wrong.', true); throw e; }
+  }
+  const toISO = s => { const m = /^(\d{2})-(\d{2})-(\d{4})$/.exec(s || ''); return m ? `${m[3]}-${m[2]}-${m[1]}` : ''; };
+  const fromISO = s => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || ''); return m ? `${m[3]}-${m[2]}-${m[1]}` : ''; };
+  const pct = (a, b) => b ? Math.round(a * 100 / b) : 0;
+
+  /* ---------------- header ---------------- */
+  function renderWho() {
+    const u = API.user;
+    $('#demoFlag').classList.toggle('hidden', !API.DEMO);
+    if (!u) { $('#who').innerHTML = ''; return; }
+    const o = op();
+    const admin = S.meta && S.meta.user && S.meta.user.isAdmin;
+    $('#who').innerHTML = `${admin ? '<a class="btn sm ghost hide-sm" href="#/dash">Dashboard</a><a class="btn sm ghost hide-sm" href="#/report">Reports</a><a class="btn sm ghost hide-sm" href="#/admin">Approvals</a>' : ''}
+      <button class="menu-btn" id="menuBtn" aria-haspopup="true" aria-expanded="false" title="${esc(u.email)}">
+        <span class="av">${esc(FL.initials(o && o.name || u.name))}</span><span class="hide-sm">${esc(o && o.name || u.name)}</span><span aria-hidden="true">▾</span></button>
+      <div class="menu hidden" id="menu" role="menu">
+        <div class="menu-who"><b>${esc(o && o.name || u.name)}</b><span>${esc(u.email)}</span></div>
+        ${admin ? '<a role="menuitem" href="#/dash">Dashboard</a><a role="menuitem" href="#/report">Reports</a><a role="menuitem" href="#/admin">Approvals</a>' : ''}
+        <a role="menuitem" href="#/circles">All circles</a>
+        <button role="menuitem" id="meBtn">My details</button>
+        <button role="menuitem" id="outBtn">Sign out</button>
+      </div>`;
+    const menu = $('#menu'), mb = $('#menuBtn');
+    mb.onclick = e => { e.stopPropagation(); const open = menu.classList.toggle('hidden') === false; mb.setAttribute('aria-expanded', open); };
+    menu.querySelectorAll('a').forEach(a => a.onclick = () => menu.classList.add('hidden'));
+    $('#outBtn').onclick = () => { API.signOut(); S.meta = null; go('#/'); render(); };
+    $('#meBtn').onclick = () => { menu.classList.add('hidden'); renderOperator(true); };
+  }
+
+  document.addEventListener('click', e => {
+    const m = $('#menu'); if (m && !e.target.closest('#menu')) { m.classList.add('hidden'); const b = $('#menuBtn'); b && b.setAttribute('aria-expanded', 'false'); }
+  });
+
+  /* ---------------- help ---------------- */
+  const helpStrip = () => `<div class="help-strip"><span class="hq" aria-hidden="true">?</span>
+    <span>Need help? Contact <b>${HELP.name}</b>, ${HELP.office} · <a href="tel:${HELP.tel}">${HELP.phone}</a></span>
+    <button class="btn sm ghost" data-help>How to use</button></div>`;
+  function openHelp() {
+    if ($('#helpScrim')) return;
+    const el = document.createElement('div'); el.className = 'scrim'; el.id = 'helpScrim';
+    el.innerHTML = `<div class="dialog help-dlg" role="dialog" aria-modal="true" aria-label="Help">
+      <div class="dhead"><div class="initials FR">?</div><div><h2>Help</h2><div class="sub">How to use UPMC2, and whom to call</div></div>
+        <button class="x" id="helpClose" aria-label="Close">×</button></div>
+      <div class="dbody">
+        <div class="help-contact"><div><span class="faint">For any help, please contact</span><b>${HELP.name}</b><span>${HELP.office}</span></div>
+          <a class="btn primary" href="tel:${HELP.tel}">Call ${HELP.phone}</a></div>
+        <ol class="help-steps">
+          <li><b>Choose your circle, then your division.</b> The ring shows how much is verified.</li>
+          <li><b>Open each officer’s card.</b> Check the <b>Posting and home district</b> box first. It matters most.</li>
+          <li><b>Posting correct?</b> Press <b>Verify this section</b> in the Posting and home district box. An outline tick appears on the card.</li>
+          <li><b>Everything correct?</b> Press <b>Verify</b> at the bottom and choose <b>Verify all details</b>. A solid blue badge appears.</li>
+          <li><b>Something wrong?</b> Press <b>Edit</b> next to that section, correct it and <b>Submit for approval</b>.</li>
+          <li><b>Officer missing?</b> Use the <b>Add a …</b> card at the end of each cadre. The administrator approves new officers.</li>
+          <li><b>Need a printout?</b> The download icon on a card gives that officer’s PDF. <b>Download all PDFs</b> gives the whole division.</li>
+        </ol>
+        <p class="faint">Your sign-in lasts 6 hours. The app works on phones and computers.</p>
+      </div></div>`;
+    document.body.appendChild(el);
+    const close = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 250); };
+    el.addEventListener('click', e => { if (e.target === el) close(); });
+    el.querySelector('#helpClose').onclick = close;
+    document.addEventListener('keydown', function esc1(e) { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc1); } });
+    requestAnimationFrame(() => el.classList.add('on'));
+  }
+  document.addEventListener('click', e => { if (e.target.closest('[data-help]')) { e.preventDefault(); openHelp(); } });
+
+  /* ---------------- sign in & operator details ---------------- */
+  function renderSignin() {
+    app.innerHTML = `<section class="signin"><div class="card">
+      <img class="emb" src="assets/emblem.svg" alt="National Emblem of India">
+      <h1>Officer data verification</h1>
+      <p class="muted">Directorate of Forests, West Bengal. Sign in to check and update the details of officers in your division.</p>
+      ${API.DEMO ? `<button class="btn primary" id="demoBtn" style="width:100%">Try with demo data</button>
+        <p class="faint" style="margin:12px 0 0">This copy is not connected to the live sheet. All names and numbers are made up.</p>`
+        : `<form class="form" id="pwForm" autocomplete="on">
+            <label>Username<input name="username" autocomplete="username" autocapitalize="none" required></label>
+            <label>Password<span class="pw"><input name="password" type="password" autocomplete="current-password" required>
+              <button type="button" class="btn sm ghost" id="showPw" aria-label="Show password">Show</button></span></label>
+            <button class="btn primary" type="submit" id="pwBtn">Sign in</button>
+            <div id="pwMsg" class="faint" role="alert"></div>
+          </form>`}
+      ${helpStrip()}
+    </div></section>`;
+    if (API.DEMO) { $('#demoBtn').onclick = () => { API.demoSignIn(); start(); }; return; }
+    $('#showPw').onclick = () => { const i = $('#pwForm').password; i.type = i.type === 'password' ? 'text' : 'password'; $('#showPw').textContent = i.type === 'password' ? 'Show' : 'Hide'; };
+    $('#pwForm').onsubmit = async e => {
+      e.preventDefault();
+      const f = e.target, btn = $('#pwBtn');
+      btn.disabled = true; btn.textContent = 'Signing in…'; $('#pwMsg').textContent = '';
+      try { await API.passwordSignIn(f.username.value.trim(), f.password.value); start(); }
+      catch (err) { $('#pwMsg').textContent = err.message; $('#pwMsg').style.color = 'var(--danger-ink)'; btn.disabled = false; btn.textContent = 'Sign in'; }
+    };
+  }
+
+  function renderOperator(editing) {
+    const o = op() || {}, u = API.user || {};
+    app.innerHTML = `<section class="signin"><div class="card" style="text-align:left">
+      <h1 style="font-size:26px">${editing ? 'Your details' : 'One more step'}</h1>
+      <p class="muted" style="margin-bottom:0">These appear as “Verified by” on the information sheets you verify.</p>
+      <form class="form" id="opForm">
+        <label>Your name<input name="name" required value="${esc(o.name || u.name || '')}"></label>
+        <label>Designation and office<input name="designation" required placeholder="e.g. Data entry operator, Kurseong Division" value="${esc(o.designation || '')}"></label>
+        <label>Mobile number (optional)<input name="mobile" inputmode="numeric" maxlength="10" value="${esc(o.mobile || '')}"></label>
+        <button class="btn primary" type="submit">Save and continue</button>
+      </form></div></section>`;
+    $('#opForm').onsubmit = e => {
+      e.preventDefault();
+      const f = new FormData(e.target), d = { name: f.get('name').trim(), designation: f.get('designation').trim(), mobile: f.get('mobile').trim() };
+      if (d.mobile && !/^\d{10}$/.test(d.mobile)) { toast('Mobile number should have 10 digits.', true); return; }
+      localStorage.setItem('upmc_operator', JSON.stringify(d));
+      renderWho(); route();
+    };
+  }
+
+  async function start() {
+    if (!op()) { renderWho(); renderOperator(false); return; }
+    if (!location.hash || location.hash === '#/') go('#/circles'); else route();
+  }
+
+  // Circle/division counts are remembered on this device, so the first screen opens instantly;
+  // fresh numbers are fetched in the background and the screen updates quietly.
+  const metaKey = () => 'upmc_meta_' + ((API.user || {}).email || '');
+  let metaFetch = null;
+  function fetchMeta() {
+    if (!metaFetch) metaFetch = guard(() => API.call('meta')).then(m => {
+      S.meta = m; metaFetch = null;
+      if (m.user) API.setAdmin(!!m.user.isAdmin);
+      try { if (!API.DEMO) localStorage.setItem(metaKey(), JSON.stringify(m)); } catch (e) {}
+      renderWho(); return m;
+    }, e => { metaFetch = null; throw e; });
+    return metaFetch;
+  }
+  async function ensureMeta(force) {
+    if (S.meta && !force && !S.meta.stale) return S.meta;
+    if (!S.meta && !force && !API.DEMO) {
+      let cached = null; try { cached = JSON.parse(localStorage.getItem(metaKey()) || 'null'); } catch (e) {}
+      if (cached && cached.circles) {
+        S.meta = Object.assign(cached, { fromCache: true });
+        fetchMeta().then(refreshTiles).catch(() => {});
+        renderWho(); return S.meta;
+      }
+    }
+    return fetchMeta();
+  }
+  function refreshTiles() {
+    const parts = location.hash.replace(/^#\/?/, '').split('/').map(decodeURIComponent), box = app.querySelector('.tiles');
+    if (!box || !S.meta || !['', 'circles', 'c'].includes(parts[0])) return;
+    if (parts[0] === 'c' && parts[1]) {
+      const c = S.meta.circles.find(x => x.circle === parts[1]);
+      if (c) box.innerHTML = c.divisions.map((d, i) => tile(d, 'Division', countFor(parts[1], d), `#/d/${encodeURIComponent(parts[1])}/${encodeURIComponent(d)}`, i)).join('');
+    } else box.innerHTML = S.meta.circles.map((c, i) => tile(c.circle, c.office, countFor(c.circle), `#/c/${encodeURIComponent(c.circle)}`, i)).join('');
+  }
+
+  /* ---------------- circles & divisions ---------------- */
+  function countFor(circle, division) {
+    const c = S.meta.counts || {}, keys = division ? [circle + '|' + division] : Object.keys(c).filter(k => k.startsWith(circle + '|'));
+    return keys.reduce((a, k) => { const x = c[k] || {}; a.total += x.total || 0; a.verified += x.verified || 0; a.pending += x.pending || 0; return a; }, { total: 0, verified: 0, pending: 0 });
+  }
+  function tile(title, sub, c, href, i) {
+    const p = pct(c.verified, c.total);
+    return `<a class="tile${c.total ? '' : ' empty'}" href="${href}" style="animation-delay:${Math.min(i, 20) * 30}ms;text-decoration:none">
+      <div class="ring" style="--p:${p}"><i>${p}%</i></div>
+      <div class="t"><b>${esc(title)}</b><span>${esc(sub)}</span><br><span class="num">${c.total} officers · ${c.verified} verified</span></div></a>`;
+  }
+  async function renderCircles() {
+    app.innerHTML = `<div class="head"><div><h1 class="page-title">Choose your circle.</h1><p class="page-sub">Then pick your division to see its officers.</p></div></div>
+      ${helpStrip()}
+      ${S.meta ? '' : loaderHtml('circles')}<div class="tiles">${'<div class="skeleton"></div>'.repeat(8)}</div>`;
+    animateLoader(app);
+    const m = await ensureMeta();
+    const ld = app.querySelector('.loader'); if (ld) ld.remove();
+    app.querySelector('.tiles').innerHTML = m.circles.map((c, i) => tile(c.circle, c.office, countFor(c.circle), `#/c/${encodeURIComponent(c.circle)}`, i)).join('');
+  }
+  async function renderDivisions(circle) {
+    if (!S.meta) { app.innerHTML = loaderHtml('circles') + `<div class="tiles">${'<div class="skeleton"></div>'.repeat(6)}</div>`; animateLoader(app); }
+    const m = await ensureMeta();
+    const c = m.circles.find(x => x.circle === circle);
+    if (!c) { go('#/circles'); return; }
+    app.innerHTML = `<div class="crumbs"><a href="#/circles">All circles</a><span class="sep">/</span><span>${esc(circle)}</span></div>
+      <div class="head"><div><h1 class="page-title">${esc(circle)} circle.</h1><p class="page-sub">Choose your division.</p></div></div>
+      <div class="tiles">${c.divisions.map((d, i) => tile(d, 'Division', countFor(circle, d), `#/d/${encodeURIComponent(circle)}/${encodeURIComponent(d)}`, i)).join('')}</div>`;
+  }
+
+  /* ---------------- division: officer cards ---------------- */
+  const FILTERS = [
+    ['all', 'All', () => true], ['unverified', 'Not verified', o => o.status === 'unverified'], ['partial', 'Posting verified', o => o.status === 'partial'], ['verified', 'All verified', o => o.status === 'verified'],
+    ['pending', 'Awaiting approval', o => o.status === 'pending'], ['attn', 'Needs attention', o => FL.needsAttention(o.data)],
+  ];
+  const CADRE_TXT = { FR: 'Forest Rangers', DFR: 'Deputy Rangers / Foresters', FG: 'Forest Guards & HFG' };
+
+  async function renderDivision(circle, division) {
+    app.innerHTML = `<div class="crumbs"><a href="#/circles">All circles</a><span class="sep">/</span><a href="#/c/${encodeURIComponent(circle)}">${esc(circle)}</a><span class="sep">/</span><span>${esc(division)}</span></div>
+      <div class="head"><div><h1 class="page-title">${esc(division)}</h1><p class="page-sub">${esc(circle)} circle. Open each officer, check the details and verify.</p></div></div>
+      ${loaderHtml('division', `Fetching the officers of ${division}…`)}
+      <div class="cards">${'<div class="skeleton"></div>'.repeat(9)}</div>`;
+    animateLoader(app);
+    // a division opened earlier in this browser tab shows instantly, then refreshes
+    const key = 'upmc_div_' + circle + '|' + division;
+    let shown = false;
+    try { const c = JSON.parse(sessionStorage.getItem(key) || 'null'); if (c) { S.div = { circle, division, officers: c.officers, schema: c.schema }; S.filter = 'all'; S.cadre = 'all'; S.q = ''; drawDivision(); shown = true; } } catch (e) {}
+    await ensureMeta();
+    const d = await guard(() => API.call('division', { circle, division }));
+    try { sessionStorage.setItem(key, JSON.stringify(d)); } catch (e) {}
+    if (shown && (S.open || location.hash !== `#/d/${encodeURIComponent(circle)}/${encodeURIComponent(division)}`)) return;
+    S.div = { circle, division, officers: d.officers, schema: d.schema };
+    if (!shown) { S.filter = 'all'; S.cadre = 'all'; S.q = ''; }
+    drawDivision();
+  }
+
+  function drawDivision(flashId) {
+    const D = S.div, list = D.officers;
+    const n = { verified: 0, partial: 0, pending: 0, unverified: 0 }; list.forEach(o => n[o.status]++);
+    const cadres = ['FR', 'DFR', 'FG'].filter(c => list.some(o => o.cadre === c));
+    app.innerHTML = `<div class="crumbs"><a href="#/circles">All circles</a><span class="sep">/</span><a href="#/c/${encodeURIComponent(D.circle)}">${esc(D.circle)}</a><span class="sep">/</span><span>${esc(D.division)}</span></div>
+      <div class="head"><div><h1 class="page-title">${esc(D.division)}</h1><p class="page-sub">${esc(D.circle)} circle · ${list.length} officers. Open each card, check the details and verify.</p></div>
+        <span class="sp"></span><button class="btn soft" id="allPdf" ${list.length ? '' : 'disabled'}>${icon.down} Download all PDFs</button></div>
+      <div class="progress"><div><div class="big">${n.verified} of ${list.length}</div><div class="faint">fully verified${n.partial ? ` · ${n.partial} posting only` : ''}</div></div>
+        <div class="bar"><i class="v" style="width:${pct(n.verified, list.length)}%"></i><i class="h" style="width:${pct(n.partial, list.length)}%"></i><i class="p" style="width:${pct(n.pending, list.length)}%"></i></div>
+        <div class="legend"><span style="--c:var(--prelims)">All verified ${n.verified}</span><span style="--c:#8fd19e">Posting verified ${n.partial}</span><span style="--c:var(--interview)">Awaiting approval ${n.pending}</span><span style="--c:var(--border-strong)">Not verified ${n.unverified}</span></div></div>
+      <div class="toolbar">
+        <div class="chips" id="fchips">${FILTERS.map(([k, l, f]) => `<button class="chip${S.filter === k ? ' on' : ''}" data-f="${k}">${l}<span class="n">${list.filter(f).length}</span></button>`).join('')}</div>
+        ${cadres.length > 1 ? `<div class="chips" id="cchips"><button class="chip${S.cadre === 'all' ? ' on' : ''}" data-c="all">All cadres</button>${cadres.map(c => `<button class="chip${S.cadre === c ? ' on' : ''}" data-c="${c}">${c === 'FG' ? 'FG / HFG' : c}</button>`).join('')}</div>` : ''}
+        <label class="search">${icon.search}<input id="q" placeholder="Search name or HRMS ID" value="${esc(S.q)}"></label>
+      </div>
+      <div id="groups"></div>`;
+    drawCards(flashId);
+    $('#allPdf').onclick = downloadAll;
+    app.querySelectorAll('#fchips .chip').forEach(b => b.onclick = () => { S.filter = b.dataset.f; drawDivision(); });
+    app.querySelectorAll('#cchips .chip').forEach(b => b.onclick = () => { S.cadre = b.dataset.c; drawDivision(); });
+    $('#q').oninput = e => { S.q = e.target.value; drawCards(); };
+  }
+
+  function visible() {
+    const f = FILTERS.find(x => x[0] === S.filter)[2], q = S.q.trim().toLowerCase();
+    return S.div.officers.filter(o => f(o) && (S.cadre === 'all' || o.cadre === S.cadre) &&
+      (!q || String(o.data.Name).toLowerCase().includes(q) || String(o.id).includes(q)));
+  }
+
+  // Instagram/Twitter-style verified badge
+  const TICK = '<svg class="tick" viewBox="0 0 24 24" aria-label="Verified" role="img"><path fill="currentColor" d="M22.5 12.5c0-1.58-.875-2.95-2.148-3.6.154-.435.238-.905.238-1.4 0-2.21-1.71-3.998-3.818-3.998-.47 0-.92.084-1.336.25C14.818 2.415 13.51 1.5 12 1.5s-2.816.917-3.437 2.25c-.415-.165-.866-.25-1.336-.25-2.11 0-3.818 1.79-3.818 4 0 .494.083.964.237 1.4-1.272.65-2.147 2.018-2.147 3.6 0 1.495.782 2.798 1.942 3.486-.02.17-.032.34-.032.514 0 2.21 1.708 4 3.818 4 .47 0 .92-.086 1.335-.25.62 1.334 1.926 2.25 3.437 2.25 1.512 0 2.818-.916 3.437-2.25.415.163.865.248 1.336.248 2.11 0 3.818-1.79 3.818-4 0-.174-.012-.344-.033-.513 1.158-.687 1.943-1.99 1.943-3.484z"/><path fill="#fff" d="M10.6 16.3 6.9 12.6l1.4-1.4 2.3 2.3 5.1-5.1 1.4 1.4z"/></svg>';
+  // outline tick: only the posting and home district are verified
+  const TICK_P = '<svg class="tick" viewBox="0 0 24 24" aria-label="Posting and home district verified" role="img"><title>Posting and home district verified</title><circle cx="12" cy="12" r="9.2" fill="none" stroke="currentColor" stroke-width="2"/><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" d="m8 12.3 2.7 2.7L16.2 9.5"/></svg>';
+  const tickOf = o => o.status === 'verified' ? TICK : o.status === 'partial' ? TICK_P : '';
+
+  function card(o, i) {
+    const d = o.data, sv = FL.service(d), attn = FL.needsAttention(d) && o.status !== 'verified' && o.status !== 'partial' && sv.kind !== 'gone';
+    const rng = d['Present Range / Office'] || '', beat = d['Present Beat'] ? ' · ' + d['Present Beat'] : '';
+    const k = esc(o.cadre + '|' + o.id);
+    return `<div class="ocard${sv.kind === 'gone' ? ' gone' : sv.kind === 'flag' ? ' flag' : ''}" role="button" tabindex="0" data-k="${k}" style="animation-delay:${Math.min(i, 24) * 25}ms" aria-label="Open ${esc(FL.cleanName(d.Name))}">
+      <button class="dl" data-dl="${k}" title="Download information sheet (PDF)" aria-label="Download PDF of ${esc(FL.cleanName(d.Name))}">${icon.down}</button>
+      <div class="top"><div class="initials ${o.cadre}">${esc(FL.initials(d.Name))}</div>
+        <div><div class="nm">${esc(FL.cleanName(d.Name))}${tickOf(o)}</div><div class="id">HRMS ${esc(o.id)}</div></div></div>
+      <div class="meta"><span class="tag">${esc(d.Designation || o.cadre)}</span> ${esc(rng + beat) || '<span class="faint">Range not recorded</span>'}</div>
+      ${o.incoming ? `<div class="faint">From ${esc(o.from || '')}</div>` : ''}
+      <div class="foot">${sv.kind !== 'working' ? `<span class="pill svc-${sv.kind}">${esc(sv.short)}</span>` : ''}${o.incoming ? '<span class="pill pending">Transfer in · awaiting approval</span>' : o.isNew ? '<span class="pill pending">New · awaiting approval</span>' : `<span class="pill ${o.status}">${STATUS_TXT[o.status]}</span>${attn ? '<span class="pill attn">Needs attention</span>' : ''}`}</div>
+    </div>`;
+  }
+  const CADRE_ONE = { FR: 'Forest Ranger', DFR: 'Deputy Ranger / Forester', FG: 'Forest Guard / HFG' };
+  const addCard = c => `<button class="ocard addcard" data-add="${c}"><span class="plus" aria-hidden="true">+</span>
+      <b>Add a ${CADRE_ONE[c]}</b><small>Posted here but not in the list? Add the officer for approval.</small></button>`;
+
+  function drawCards(flashId) {
+    const vis = visible();
+    const canAdd = S.filter === 'all' && !S.q.trim();          // add cards show on the unfiltered view
+    let i = 0;
+    const html = ['FR', 'DFR', 'FG'].map(c => {
+      const g = vis.filter(o => o.cadre === c), show = canAdd && (S.cadre === 'all' || S.cadre === c);
+      if (!g.length && !show) return '';
+      const gone = g.filter(o => FL.service(o.data).kind === 'gone').length;
+      return `<div class="group-h"><h3>${CADRE_TXT[c]}</h3><span>${g.length}</span>${gone ? `<small class="gone-n">incl. ${gone} not serving</small>` : ''}</div><div class="cards">${g.map(o => card(o, i++)).join('')}${show ? addCard(c) : ''}</div>`;
+    }).join('');
+    $('#groups').innerHTML = html || `<div class="empty-state"><b>No officers here.</b>Try another filter.</div>`;
+    app.querySelectorAll('.addcard').forEach(b => b.onclick = () => openFinder(b.dataset.add));
+    app.querySelectorAll('.ocard:not(.addcard)').forEach(b => {
+      b.onclick = e => { if (!e.target.closest('.dl')) openProfile(b.dataset.k); };
+      b.onkeydown = e => { if ((e.key === 'Enter' || e.key === ' ') && e.target === b) { e.preventDefault(); openProfile(b.dataset.k); } };
+    });
+    app.querySelectorAll('.ocard .dl').forEach(b => b.onclick = e => { e.stopPropagation(); pdfOne(findO(b.dataset.dl)); });
+    if (flashId) {
+      const el = app.querySelector(`.ocard[data-k="${CSS.escape(flashId)}"]`);
+      if (el) { el.classList.add('flash'); }
+      const nxt = vis.find(o => o.status === 'unverified' && o.cadre + '|' + o.id !== flashId);
+      const nel = nxt && app.querySelector(`.ocard[data-k="${CSS.escape(nxt.cadre + '|' + nxt.id)}"]`);
+      if (nel) { nel.classList.add('next'); nel.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => nel.classList.remove('next'), 4000); }
+    }
+  }
+
+  /* ---------------- profile dialog ---------------- */
+  const findO = k => (k === '__add__' ? S.adding : S.div.officers.find(o => o.cadre + '|' + o.id === k));
+
+  /* ----- track changes: the officer's history from the Change Log, shown inline (red / green) and as a timeline ----- */
+  S.hist = {}; S.histField = null;
+  S.track = (() => { try { return localStorage.getItem('upmc_track') === '1'; } catch (e) { return false; } })();
+  const histOf = o => S.hist[o.cadre + '|' + o.id];
+  async function loadHist(o, force) {
+    const k = o.cadre + '|' + o.id, h = S.hist[k];
+    if (!force && h && (h.events || h.loading)) return;
+    S.hist[k] = { loading: true };
+    if (S.open === k) drawProfile();   // shows the snail while the history loads
+    try { const r = await API.call('history', { cadre: o.cadre, id: o.id }); S.hist[k] = { events: r.events || [] }; }
+    catch (e) { S.hist[k] = { error: e.message || 'Could not load the history.' }; }
+    if (S.open === k) drawProfile();
+  }
+  const fieldEdits = (o, f) => { const h = histOf(o); return h && h.events ? h.events.filter(e => e.type === 'Edit' && e.field === f && e.old !== e.value) : []; };
+  const SNAIL = `<svg class="snail-ld" viewBox="0 0 160 70" aria-hidden="true">
+      <line x1="10" y1="60" x2="150" y2="60" stroke="var(--border)" stroke-width="4" stroke-linecap="round"/>
+      <rect class="sn-trail" x="12" y="58" width="118" height="4" rx="2" fill="#9fd6f2"/>
+      <g class="sn-move"><path class="sn-foot" d="M4 60 C6 52 18 50 30 54 C34 56 36 58 37 60 Z" fill="#c5e1a5"/>
+        <g class="sn-st"><line x1="30" y1="54" x2="33" y2="40" stroke="#a5c886" stroke-width="2" stroke-linecap="round"/><circle cx="33" cy="39" r="2.4" fill="#191918"/></g>
+        <g class="sn-st"><line x1="27" y1="54" x2="26" y2="42" stroke="#a5c886" stroke-width="2" stroke-linecap="round"/><circle cx="26" cy="41" r="2.2" fill="#191918"/></g>
+        <circle cx="14" cy="46" r="13" fill="#e0a96d"/>
+        <path d="M14 46 m0 -2 a2 2 0 1 1 -2 2 a4 4 0 1 1 4 4 a6.5 6.5 0 1 1 -6.5 -6.5 a9 9 0 1 1 9 9" stroke="#a86d34" stroke-width="2" fill="none" stroke-linecap="round"/></g></svg>`;
+  const snailLoader = () => `<div class="snail-box">${SNAIL}<p>…slow and steady, loading changes</p></div>`;
+  const ST_PILL = { Approved: 'verified', Pending: 'pending', Rejected: 'attn' };
+  const ST_TXT = { Approved: 'Approved', Pending: 'Awaiting approval', Rejected: 'Rejected' };
+  const who = e => `${esc(e.by || 'Someone')}${e.desig ? ', ' + esc(e.desig) : ''}${e.email ? ` <span class="faint">· ${esc(e.email)}</span>` : ''}${e.mobile ? ` <span class="faint">· ${esc(e.mobile)}</span>` : ''}`;
+  const reviewTxt = e => e.status === 'Pending' ? '' : `${e.status === 'Rejected' ? 'Rejected' : 'Approved'}${e.reviewedOn ? ' on ' + esc(e.reviewedOn) : ''}${e.note && !/^(Approved|Rejected) by/.test(e.note) ? ' · “' + esc(e.note) + '”' : e.note ? ' · ' + esc(e.note.replace(/^(Approved|Rejected) /, '')) : ''}`;
+  function fieldCard(o, f) {
+    const ev = fieldEdits(o, f).slice().reverse();
+    return `<div class="row full hcard-row"><div class="hcard">${ev.map(e => `<div class="hc-item">
+        <div class="hc-ch"><del>${esc(e.old || '(blank)')}</del><span class="arr">→</span><ins class="${e.status === 'Pending' ? 'prop' : e.status === 'Rejected' ? 'rej' : ''}">${esc(e.value || '(blank)')}</ins>
+          <span class="pill ${ST_PILL[e.status] || 'pending'}">${ST_TXT[e.status] || esc(e.status)}</span></div>
+        <div class="hc-meta">Sent by ${who(e)} on ${esc(e.on)}</div>${reviewTxt(e) ? `<div class="hc-meta">${reviewTxt(e)}</div>` : ''}</div>`).join('')}</div></div>`;
+  }
+  function timelineHtml(o) {
+    const h = histOf(o);
+    if (!h || h.loading) return '';
+    if (h.error) return `<section class="sec hist"><div class="sec-h"><h3>History</h3></div><div class="notice attn">${esc(h.error)} <button class="btn sm" id="histRetry">Try again</button></div></section>`;
+    const evs = h.events.filter(e => !(e.type === 'Edit' && e.field === 'Verification'));
+    if (!evs.length) return `<section class="sec hist"><div class="sec-h"><h3>History</h3></div><p class="faint hist-empty">No changes or verifications through UPMC2 yet. The details are as in the register.</p></section>`;
+    const groups = []; evs.forEach(e => { const g = groups.find(x => x.sub === e.sub); g ? g.list.push(e) : groups.push({ sub: e.sub, list: [e] }); });
+    const line = e => {
+      if (e.type === 'Verify') return `<li class="tl-v">${/Posting/.test(e.value) ? TICK_P : TICK}<span><b>${/Posting/.test(e.value) ? 'Verified posting and home district' : 'Verified all details'}</b></span></li>`;
+      if (e.type === 'Add') return `<li><span><b>Added to the register as a new officer</b> <span class="pill ${ST_PILL[e.status] || 'pending'}">${ST_TXT[e.status] || esc(e.status)}</span></span></li>`;
+      return `<li><span><b>${esc(FL.label(e.field))}:</b> <del>${esc(e.old || '(blank)')}</del><span class="arr">→</span><ins class="${e.status === 'Pending' ? 'prop' : e.status === 'Rejected' ? 'rej' : ''}">${esc(e.value || '(blank)')}</ins>
+        <span class="pill ${ST_PILL[e.status] || 'pending'}">${ST_TXT[e.status] || esc(e.status)}</span></span></li>`;
+    };
+    return `<section class="sec hist"><div class="sec-h"><h3>History</h3><span class="faint">${evs.length} entr${evs.length === 1 ? 'y' : 'ies'}, newest first</span></div>
+      <ol class="timeline">${groups.reverse().map(g => { const f = g.list[0], rv = g.list.find(e => e.status !== 'Pending'); return `<li class="tl-g">
+        <div class="tl-h">${f.type === 'Verify' ? 'By' : f.type === 'Add' ? 'Sent by' : 'Correction sent by'} ${who(f)} <span class="faint">· ${esc(f.on)}</span></div>
+        <ul>${g.list.map(line).join('')}</ul>${rv && f.type !== 'Verify' && reviewTxt(rv) ? `<div class="tl-r">${reviewTxt(rv)}</div>` : ''}</li>`; }).join('')}</ol></section>`;
+  }
+  const editing = () => S.editSecs.size > 0;
+
+  function openProfile(k) {
+    if (S.open || $('#scrim')) return;
+    S.open = k; S.editSecs = new Set(); S.edits = {}; S.histField = null;
+    const el = document.createElement('div'); el.className = 'scrim'; el.id = 'scrim';
+    el.innerHTML = '<div class="dialog" role="dialog" aria-modal="true"></div>';
+    document.body.appendChild(el); document.body.style.overflow = 'hidden';
+    el.addEventListener('click', e => { if (e.target === el) closeProfile(); });
+    drawProfile();
+    requestAnimationFrame(() => el.classList.add('on'));
+    if (S.track && k !== '__add__') { const o = findO(k); if (o) loadHist(o); }
+  }
+  function closeProfile(force) {
+    const typed = Object.keys(S.edits).filter(k => !(S.adding && k === 'Designation')).length;
+    if (!force && typed && !confirm(S.adding ? 'Discard this new officer?' : 'You have changes that are not submitted. Close anyway?')) return;
+    const el = $('#scrim'); if (!el) return;
+    el.classList.remove('on'); document.body.style.overflow = '';
+    setTimeout(() => el.remove(), 250);
+    S.open = null; S.editSecs = new Set(); S.edits = {}; S.adding = null;
+  }
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && S.open) closeProfile(); });
+
+  function valueHtml(o, f) {
+    const v = S.edits.hasOwnProperty(f) ? S.edits[f] : o.data[f];
+    if (S.track && !o.isDraft) {   // red = old, green = new; rejected changes stay in the timeline only
+      const ev = fieldEdits(o, f), pend = ev.filter(e => e.status === 'Pending').slice(-1)[0], appr = ev.filter(e => e.status === 'Approved').slice(-1)[0];
+      if (pend || appr) {
+        const n = ev.filter(e => e.status !== 'Rejected').length, open = S.histField === f;
+        const body = pend ? `<del>${esc(pend.old || '(blank)')}</del><ins class="prop">${esc(pend.value || '(blank)')}</ins><span class="tc-tag">awaiting approval</span>`
+          : `<del>${esc(appr.old || '(blank)')}</del><ins>${esc(v || '(blank)')}</ins>`;
+        return `<button class="v tc${open ? ' open' : ''}" data-hf="${esc(f)}" aria-expanded="${open}" title="Who changed this, and when">${body}<span class="tc-n">${n > 1 ? n + ' changes' : 'details'} ${open ? '▴' : '▾'}</span></button>`;
+      }
+    }
+    const p = (o.pending || []).filter(x => x.field === f).slice(-1)[0];
+    return `<div class="v${v ? '' : ' empty'}">${v ? esc(v) : 'Not recorded'}${p ? `<span class="pa">Awaiting approval: ${esc(p.value || '(blank)')}</span>` : ''}</div>`;
+  }
+  function inputHtml(o, f, type) {
+    const cur = S.edits.hasOwnProperty(f) ? S.edits[f] : (o.data[f] || ''), m = S.meta;
+    const opts = (list, blank) => (blank !== false ? `<option value="">${blank || 'Choose…'}</option>` : '') + list.map(x => `<option${x === cur ? ' selected' : ''}>${esc(x)}</option>`).join('');
+    const a = `data-f="${esc(f)}" aria-label="${esc(FL.label(f))}"`;
+    if (type === 'locked') return valueHtml(o, f);
+    if (type === 'date') return `<input type="date" ${a} value="${toISO(cur)}">`;
+    if (type === 'district') return `<select ${a}>${opts(m.districts)}</select>`;
+    if (type === 'status') return `<select ${a}>${opts(m.status, 'Working (none of these)')}</select>`;
+    if (type === 'designation') return `<select ${a}>${opts((m.cadres.find(c => c.code === o.cadre) || {}).designations || [], false)}</select>`;
+    if (type === 'circle') return `<select ${a}>${opts(m.circles.map(c => c.circle), false)}</select>`;
+    if (type === 'division') { const c = S.edits.Circle || o.data.Circle; return `<select ${a}>${opts((m.circles.find(x => x.circle === c) || {}).divisions || [])}</select>`; }
+    if (type === 'longtext') return `<textarea ${a}>${esc(cur)}</textarea>`;
+    return `<input ${a} value="${esc(cur)}">`;
+  }
+
+  /* ----- before adding: search the whole register, offer a transfer if the officer is already listed ----- */
+  function smallDialog(id, html) {
+    const old = $('#' + id); if (old) old.remove();
+    const el = document.createElement('div'); el.className = 'scrim'; el.id = id;
+    el.innerHTML = `<div class="dialog" role="dialog" aria-modal="true">${html}</div>`;
+    document.body.appendChild(el); document.body.style.overflow = 'hidden';
+    const close = () => { el.classList.remove('on'); document.body.style.overflow = ''; setTimeout(() => el.remove(), 250); };
+    el.addEventListener('click', e => { if (e.target === el || e.target.closest('[data-close]')) close(); });
+    requestAnimationFrame(() => el.classList.add('on'));
+    return { el, close };
+  }
+  function openFinder(cadre) {
+    const one = CADRE_ONE[cadre];
+    const dlg = smallDialog('finder', `
+      <div class="dhead"><div class="initials ${cadre} addav">⌕</div>
+        <div><h2>Add a ${one}</h2><div class="sub">To <b>${esc(S.div.division)}</b>, ${esc(S.div.circle)} circle</div></div>
+        <button class="x" data-close aria-label="Close">×</button></div>
+      <div class="dbody">
+        <div class="notice info" style="margin-top:18px"><b>Step 1.</b> Check whether the officer is already in the register, for example listed in their old division. Search by HRMS ID or name.</div>
+        <form class="finder" id="fForm"><label class="search big">${icon.search}<input id="fQ" placeholder="HRMS ID or name" autocomplete="off" autofocus></label>
+          <button class="btn primary" type="submit">Search</button></form>
+        <div id="fRes" class="fres"><p class="faint">Results from all divisions appear here.</p></div>
+      </div>
+      <div class="dfoot"><span class="ask" id="fAsk">Search first</span><span class="sp"></span>
+        <button class="btn" data-close>Cancel</button><button class="btn" id="fNew" disabled>＋ Not found? Add as a new officer</button></div>`);
+    const res = dlg.el.querySelector('#fRes');
+    dlg.el.querySelector('#fForm').onsubmit = async e => {
+      e.preventDefault();
+      const q = dlg.el.querySelector('#fQ').value.trim();
+      if (q.length < 3) { res.innerHTML = '<p class="faint">Type at least 3 letters or digits.</p>'; return; }
+      res.innerHTML = '<div class="spinner"></div><p class="faint ctr">Searching all divisions…</p>';
+      try {
+        const r = await guard(() => API.call('search', { cadre, q }));
+        dlg.el.querySelector('#fNew').disabled = false;
+        dlg.el.querySelector('#fAsk').textContent = r.results.length ? 'Is one of these the officer?' : 'Not found in the register';
+        res.innerHTML = !r.results.length ? `<div class="empty-state small"><b>No ${one} matches “${esc(q)}”.</b>Try the HRMS ID or another spelling. If the officer is really not listed, add them as a new officer.</div>`
+          : r.results.map((x, i) => {
+            const here = x.circle === S.div.circle && x.division === S.div.division;
+            const act = here ? '<span class="pill verified">Already in this division</span>'
+              : x.pendingTransfer ? '<span class="pill pending">Transfer already requested</span>'
+              : x.isNew ? '<span class="pill pending">New · awaiting approval</span>'
+              : `<button class="btn sm primary" data-i="${i}">Bring to ${esc(S.div.division)}</button>`;
+            return `<div class="fitem"><div class="initials ${x.cadre}">${esc(FL.initials(x.name))}</div>
+              <div class="fi"><b>${esc(FL.cleanName(x.name))}</b><span class="faint">${esc(x.designation || x.cadre)} · HRMS ${esc(x.id)}</span>
+              <span>Now in <b>${esc(x.division)}</b>, ${esc(x.circle)}${x.range ? ' · ' + esc(x.range) : ''}</span></div>${act}</div>`;
+          }).join('') + (r.more ? `<p class="faint">${r.more} more match. Type more of the name to narrow down.</p>` : '');
+        res.querySelectorAll('[data-i]').forEach(b => b.onclick = () => { dlg.close(); setTimeout(() => openTransfer(r.results[+b.dataset.i]), 260); });
+      } catch (err) { res.innerHTML = `<p class="faint">${esc(err.message)}</p>`; }
+    };
+    dlg.el.querySelector('#fNew').onclick = () => { dlg.close(); setTimeout(() => openAdd(cadre), 260); };
+    setTimeout(() => { const i = dlg.el.querySelector('#fQ'); i && i.focus(); }, 300);
+  }
+  function openTransfer(x) {
+    const schema = (S.div.schema[x.cadre] || []).map(f => f.name), has = f => schema.includes(f);
+    const sinceF = x.cadre === 'DFR' ? 'Since when in this Beat' : 'Since when in this Range';
+    const crossCircle = x.circle !== S.div.circle;
+    const districts = (S.meta.districts || []).map(d => `<option>${esc(d)}</option>`).join('');
+    const fields = [
+      ['Present Range / Office', 'Range / office in ' + S.div.division, 'text', true],
+      ['District in which Range lies', 'District of that range', 'district', true],
+      has('Present Beat') ? ['Present Beat', 'Beat', 'text', x.cadre === 'DFR'] : null,
+      [sinceF, x.cadre === 'DFR' ? 'Since when in this beat' : 'Since when in this range', 'date', true],
+      ['Division Date', 'Date of joining ' + S.div.division, 'date', true],
+      crossCircle ? ['Circle Date', 'Date of joining ' + S.div.circle + ' circle', 'date', true] : null,
+      ['Remarks', 'Remarks (order no., date etc.)', 'longtext', false],
+    ].filter(Boolean);
+    const dlg = smallDialog('transfer', `
+      <div class="dhead"><div class="initials ${x.cadre}">${esc(FL.initials(x.name))}</div>
+        <div><h2>${esc(FL.cleanName(x.name))}</h2><div class="sub">${esc(x.designation || x.cadre)} · HRMS ${esc(x.id)}</div>
+          <div class="tr-route"><span>${esc(x.division)}<small>${esc(x.circle)}</small></span><b aria-hidden="true">→</b><span class="to">${esc(S.div.division)}<small>${esc(S.div.circle)}</small></span></div></div>
+        <button class="x" data-close aria-label="Close">×</button></div>
+      <div class="dbody"><div class="notice info" style="margin-top:18px"><b>Step 2.</b> Request the transfer. The officer moves to ${esc(S.div.division)} after the administrator approves.</div>
+        <div class="bio">${fields.map(([f, l, t, req]) => `<div class="row${t === 'longtext' ? ' full' : ''}"><div class="k">${esc(l)}${req ? ' <span class="req">*</span>' : ''}</div>${
+          t === 'date' ? `<input type="date" data-t="${esc(f)}" data-req="${req ? 1 : ''}">` : t === 'district' ? `<select data-t="${esc(f)}" data-req="1"><option value="">Choose…</option>${districts}</select>`
+          : t === 'longtext' ? `<textarea data-t="${esc(f)}"></textarea>` : `<input data-t="${esc(f)}" data-req="${req ? 1 : ''}">`}</div>`).join('')}</div></div>
+      <div class="dfoot"><span class="ask">Fields marked * are needed</span><span class="sp"></span><button class="btn" data-close>Cancel</button>
+        <button class="btn primary" id="trGo">${icon.send} Request transfer</button></div>`);
+    dlg.el.querySelector('#trGo').onclick = async () => {
+      const vals = {}; let miss = [];
+      dlg.el.querySelectorAll('[data-t]').forEach(el => { const f = el.dataset.t, v = el.type === 'date' ? fromISO(el.value) : el.value.trim(); if (v) vals[f] = v; else if (el.dataset.req) miss.push(el.closest('.row').querySelector('.k').textContent.replace('*', '').trim()); });
+      if (miss.length) { toast('Please fill: ' + miss.join(', '), true); return; }
+      const changes = [{ field: 'Division', value: S.div.division }].concat(crossCircle ? [{ field: 'Circle', value: S.div.circle }] : [])
+        .concat(Object.entries(vals).map(([field, value]) => ({ field, value }))).concat([{ field: 'Verification', value: 'Corrected' }]);
+      const b = busy('Sending the transfer for approval…', false, 'save');
+      try {
+        await guard(() => API.call('submit', { cadre: x.cadre, id: x.id, circle: x.circle, division: x.division, changes, operator: op() }));
+        const data = Object.assign({ Name: x.name, Designation: x.designation, 'Employee ID': x.id, Circle: S.div.circle, Division: S.div.division }, vals);
+        S.div.officers.push({ cadre: x.cadre, id: x.id, incoming: true, from: x.circle + ' / ' + x.division, status: 'pending', data, pending: changes.map(c => ({ field: c.field, value: c.value })) });
+        try { sessionStorage.removeItem('upmc_div_' + S.div.circle + '|' + S.div.division); sessionStorage.removeItem('upmc_div_' + x.circle + '|' + x.division); } catch (e) {}
+        if (S.meta) S.meta.stale = true;
+        b.done(); dlg.close(); toast(`Transfer of ${FL.cleanName(x.name)} sent for approval.`);
+        drawDivision(x.cadre + '|' + x.id);
+      } catch (e) { b.done(); }
+    };
+  }
+
+  /* ----- add a new officer: the profile window in "new" mode, every section open for typing ----- */
+  const ADD_REQUIRED = ['Employee ID', 'Name', 'Present Range / Office', 'District in which Range lies', 'Home District'];
+  function openAdd(cadre) {
+    const des = (S.meta.cadres.find(c => c.code === cadre) || {}).designations || [cadre];
+    S.adding = { cadre, id: '__add__', isDraft: true, status: 'unverified', pending: [], data: { Circle: S.div.circle, Division: S.div.division, Designation: des[0] } };
+    openProfile('__add__');
+    S.editSecs = new Set(['identity', 'posting', 'personal', 'service', 'status']);
+    S.edits = { Designation: des[0] };
+    drawProfile();
+  }
+  async function submitAdd(o) {
+    const data = Object.assign({ Circle: S.div.circle, Division: S.div.division }, S.edits);
+    const names = S.div.schema[o.cadre].map(f => f.name);
+    const miss = ADD_REQUIRED.filter(f => !String(data[f] || '').trim()).concat(FL.missing(data, names));
+    if (miss.length) { toast('Please fill: ' + miss.map(FL.label).join(', '), true); return; }
+    const b = busy('Sending the new officer for approval…', false, 'save');
+    try {
+      const r = await guard(() => API.call('addOfficer', { cadre: o.cadre, data, operator: op() }));
+      const nw = { cadre: o.cadre, id: r.id, data, isNew: true, status: 'pending', pending: [{ field: '(New officer)', value: 'New officer', by: (op() || {}).name, on: 'now' }] };
+      S.div.officers.push(nw);
+      try { sessionStorage.removeItem('upmc_div_' + S.div.circle + '|' + S.div.division); } catch (e) {}
+      b.done(); S.edits = {}; S.editSecs = new Set(); closeProfile(true); S.adding = null;
+      toast(`${FL.cleanName(data.Name)} sent for approval as a new ${CADRE_ONE[o.cadre]}.`);
+      drawDivision(nw.cadre + '|' + nw.id);
+    } catch (e) { b.done(); }
+  }
+
+  function drawProfile() {
+    const o = findO(S.open), d = o.data, schema = S.div.schema[o.cadre], types = {}; schema.forEach(f => types[f.name] = f.type);
+    if (o.isDraft) types['Employee ID'] = 'text';
+    const t = FL.tenure(d), y = FL.fmtYears;
+    let secs = FL.sections(schema);
+    if (o.isDraft) {
+      secs = secs.filter(x => x.id !== 'reference').map(x => Object.assign({}, x, { fields: x.fields.filter(f => !['Name', 'Designation', 'Circle', 'Division'].includes(f)) }));
+      secs.unshift({ id: 'identity', title: 'Officer', fields: ['Employee ID', 'Name', 'Designation'] });
+    }
+    const names = schema.map(f => f.name), view = Object.assign({}, d, S.edits);
+    const reqF = FL.requiredFields(view, names), miss = FL.missing(view, names);
+    const attn = [];
+    if (d['Posting List Match'] === 'Not present in posting list') attn.push('Not found in the posting list of 29.08.2026. Please confirm the present posting.');
+    if (miss.length && !o.isDraft) attn.push('<b>Fill before verifying:</b> ' + miss.map(f => esc(FL.label(f))).join(', ') + '.');
+    const nChanged = Object.keys(S.edits).length;
+    const dlg = $('#scrim .dialog');
+    const keepScroll = dlg.querySelector('.dbody') ? dlg.querySelector('.dbody').scrollTop : 0;
+    const secHtml = s => {
+      const on = S.editSecs.has(s.id), urgent = s.id === 'posting', canEdit = s.id !== 'reference' && !o.isNew && !o.isDraft && !o.incoming;
+      const secDone = urgent && !o.isDraft && postingVerified(d), secVer = urgent && canEdit && !editing() && !secDone;
+      const req = f => (o.isDraft && ADD_REQUIRED.includes(f)) || reqF.includes(f) ? ' <span class="req" title="Required before verifying">*</span>' : '';
+      const rows = s.fields.map(f => `<div class="row${['Remarks', 'Posting List Remarks', 'Remarks in Gradation List'].includes(f) ? ' full' : ''}${S.edits.hasOwnProperty(f) && !o.isDraft ? ' chg' : ''}${miss.includes(f) && !o.isDraft ? ' miss' : ''}">
+          <div class="k">${esc(FL.label(f))}${req(f)}</div>${on ? inputHtml(o, f, types[f]) : valueHtml(o, f)}</div>${!on && S.track && S.histField === f ? fieldCard(o, f) : ''}`).join('');
+      const nTc = S.track && !o.isDraft ? s.fields.filter(f => fieldEdits(o, f).some(e => e.status !== 'Rejected')).length : 0;
+      return `<section class="sec${urgent ? ' urgent' : ''}${on ? ' editing' : ''}">
+        <div class="sec-h"><h3>${esc(s.title)}</h3>${nTc ? `<span class="tc-count">${nTc} changed</span>` : ''}${secDone ? '<span class="done-tag">' + icon.check + ' Verified</span>' : urgent ? '<span class="urgent-tag">Check first</span>' : ''}<span class="sp"></span>
+          ${canEdit ? (on ? '<span class="editing-tag">Editing</span>' : `<button class="btn sm ghost sec-edit" data-sec="${s.id}">${icon.edit} Edit</button>`) : ''}
+          ${secVer ? `<button class="btn sm sec-ver" id="secVer">${icon.check} Verify this section</button>` : ''}</div>
+        ${urgent && !o.isDraft ? `${attn.length ? `<div class="notice attn">${attn.join('<br>')}</div>` : ''}
+          <div class="summary">
+            <div><b>${y(t.posting)}</b><span>${t.postingLabel.toLowerCase()}</span></div>
+            <div><b>${y(t.division)}</b><span>in present division</span></div>
+            <div><b>${y(t.circle)}</b><span>in present circle</span></div>
+            <div class="${t.home ? 'warn' : ''}"><b>${t.home ? 'Yes' : (d['Home District'] && d['District in which Range lies'] ? 'No' : '—')}</b><span>posted in home district</span></div>
+          </div>` : ''}
+        <div class="bio">${rows}</div></section>`;
+    };
+    if (o.isDraft) {
+      const nm = S.edits.Name || '';
+      dlg.innerHTML = `
+      <div class="dhead"><div class="initials ${o.cadre} addav">${nm ? esc(FL.initials(nm)) : '+'}</div>
+        <div><h2>${nm ? esc(nm) : 'New ' + CADRE_ONE[o.cadre]}</h2>
+          <div class="sub">Adding to <b>${esc(S.div.division)}</b>, ${esc(S.div.circle)} circle</div></div>
+        <button class="x" id="dClose" aria-label="Close">×</button></div>
+      <div class="dbody">
+        <div class="notice info" style="margin-top:18px">Fill the officer’s details as on the service record. Fields marked * are needed. The officer is added after the administrator approves.</div>
+        ${secs.map(secHtml).join('')}
+      </div>
+      <div class="dfoot"><span class="ask">${ADD_REQUIRED.filter(f => !String(S.edits[f] || '').trim()).length || miss.length ? 'Fill the fields marked *' : 'Ready to send'}</span><span class="sp"></span>
+        <button class="btn" id="cancelAdd">Cancel</button><button class="btn primary" id="submitAdd">${icon.send} Send for approval</button></div>`;
+      dlg.querySelector('.dbody').scrollTop = keepScroll;
+      $('#dClose').onclick = () => closeProfile();
+      $('#cancelAdd').onclick = () => closeProfile();
+      dlg.querySelectorAll('[data-f]').forEach(el => el.addEventListener('change', e => {
+        const f = e.target.dataset.f, val = types[f] === 'date' ? fromISO(e.target.value) : e.target.value.trim();
+        if (val) S.edits[f] = val; else delete S.edits[f];
+        drawProfile();
+      }));
+      $('#submitAdd').onclick = () => submitAdd(o);
+      return;
+    }
+    dlg.innerHTML = `
+      <div class="dhead"><div class="initials ${o.cadre}">${esc(FL.initials(d.Name))}</div>
+        <div><h2>${esc(FL.cleanName(d.Name))}${tickOf(o)}</h2>
+          <div class="sub"><b>${esc(d.Designation || o.cadre)}</b> · HRMS ID <b class="num">${esc(o.id)}</b> · ${esc(d.Division)}, ${esc(d.Circle)}</div>
+          <div class="pills"><span class="pill ${o.status}">${STATUS_TXT[o.status]}</span>${d['Last Updated By'] && (o.status === 'verified' || o.status === 'partial') ? `<span class="faint" style="align-self:center">by ${esc(d['Last Updated By'].split(' · ')[0])} on ${esc(d['Last Updated On'])}</span>` : ''}
+            <button class="tc-switch${S.track ? ' on' : ''}" id="tcSwitch" role="switch" aria-checked="${S.track}"><span class="knob" aria-hidden="true"></span>Track changes</button></div></div>
+        <button class="x" id="dClose" aria-label="Close">×</button></div>
+      <div class="dbody">
+        ${editing() ? `<div class="notice info" style="margin-top:18px">Change only what is wrong. Your changes go to the administrator for approval.${S.edits.Division && S.edits.Division !== d.Division ? '<br><b>This is a transfer.</b> Also enter the date of joining the new division (Division date)' + (S.edits.Circle && S.edits.Circle !== d.Circle ? ' and the new circle (Circle date)' : '') + '.' : ''}</div>` : ''}
+        ${o.incoming ? `<div class="notice pend">Transfer from ${esc(o.from || 'another division')} has been requested and is waiting for the administrator’s approval. The details below are the proposed ones.</div>`
+          : o.isNew ? '<div class="notice pend">This officer was added by a division and is waiting for the administrator’s approval. It can be verified or edited after approval.</div>'
+          : (!editing() && (o.pending || []).length ? `<div class="notice pend">${o.pending.length} change(s) sent earlier are waiting for approval.</div>` : '')}
+        ${S.track && (histOf(o) || {}).loading ? snailLoader() : ''}
+        ${S.track && (histOf(o) || {}).events ? '<div class="tc-legend"><del>old</del><ins>new</ins><span>Click a changed value to see who changed it and when. Rejected changes are in the History at the end.</span></div>' : ''}
+        ${secs.map(secHtml).join('')}
+        ${S.track ? timelineHtml(o) : ''}
+      </div>
+      <div class="dfoot">${editing()
+        ? `<span class="ask">${nChanged ? `${nChanged} field${nChanged > 1 ? 's' : ''} changed` : 'Make your changes above'}</span><span class="sp"></span>
+           <button class="btn" id="cancelEdit">Cancel</button><button class="btn primary" id="submitEdit" ${nChanged ? '' : 'disabled'}>${icon.send} Submit for approval</button>`
+        : (o.isNew || o.incoming) ? `<span class="ask">Awaiting approval</span><span class="sp"></span><button class="btn" id="okClose">Close</button>`
+        : `<span class="ask">Is everything correct?</span><span class="sp"></span>
+           <div class="vmenu-wrap">
+             <div class="vmenu" id="vmenu" role="menu" hidden>
+               <button role="menuitem" data-lv="posting" ${postingVerified(d) ? 'disabled' : ''}><span class="vi pin">${TICK_P}</span><span><b>Verify posting and home district only</b><small>${postingVerified(d) ? 'Already verified' : 'Range, district of range, home district, division, circle and dates'}</small></span></button>
+               <button role="menuitem" data-lv="all"><span class="vi all">${TICK}</span><span><b>Verify all details</b><small>Posting, home district, personal, service and status details</small></span></button>
+             </div>
+             <button class="btn good" id="verBtn" aria-haspopup="menu" aria-expanded="false">${icon.check} Verify <span class="caret">▾</span></button>
+           </div>`}</div>`;
+    dlg.querySelector('.dbody').scrollTop = keepScroll;
+    $('#dClose').onclick = () => closeProfile();
+    $('#tcSwitch').onclick = () => {
+      S.track = !S.track; S.histField = null;
+      try { localStorage.setItem('upmc_track', S.track ? '1' : '0'); } catch (e) {}
+      drawProfile(); if (S.track) loadHist(o);
+    };
+    dlg.querySelectorAll('[data-hf]').forEach(b => b.onclick = () => { S.histField = S.histField === b.dataset.hf ? null : b.dataset.hf; drawProfile(); });
+    const hr = $('#histRetry'); if (hr) hr.onclick = () => loadHist(o, true);
+    dlg.querySelectorAll('.sec-edit').forEach(b => b.onclick = () => {
+      S.editSecs.add(b.dataset.sec); drawProfile();
+      const first = $(`#scrim section.editing [data-f]`); first && first.focus({ preventScroll: true });
+    });
+    dlg.querySelectorAll('[data-f]').forEach(el => el.addEventListener('change', e => {
+      const f = e.target.dataset.f, val = types[f] === 'date' ? fromISO(e.target.value) : e.target.value.trim();
+      if (val === (o.data[f] || '')) delete S.edits[f]; else S.edits[f] = val;
+      if (f === 'Circle') S.edits.Division = '';
+      drawProfile();
+    }));
+    if (editing()) {
+      $('#cancelEdit').onclick = () => { if (!nChanged || confirm('Discard your changes?')) { S.editSecs = new Set(); S.edits = {}; drawProfile(); } };
+      $('#submitEdit').onclick = () => submitEdits(o);
+    } else if (o.isNew || o.incoming) {
+      $('#okClose').onclick = () => closeProfile();
+    } else {
+      const menu = $('#vmenu'), vb = $('#verBtn');
+      const shut = () => { menu.hidden = true; vb.setAttribute('aria-expanded', 'false'); };
+      vb.onclick = e => { e.stopPropagation(); menu.hidden = !menu.hidden; vb.setAttribute('aria-expanded', String(!menu.hidden)); };
+      dlg.onclick = e => { if (!menu.hidden && !e.target.closest('.vmenu-wrap')) shut(); };
+      menu.querySelectorAll('[data-lv]').forEach(b => b.onclick = () => { shut(); verify(o, b.dataset.lv); });
+      const sv = $('#secVer'); if (sv) sv.onclick = () => verify(o, 'posting');
+    }
+  }
+
+  async function verify(o, level) {
+    level = level === 'posting' ? 'posting' : 'all';
+    const miss = FL.missing(o.data, S.div.schema[o.cadre].map(f => f.name));
+    if (miss.length) {   // required posting fields first: open the posting section for editing
+      const waiting = miss.filter(f => (o.pending || []).some(p => p.field === f && p.value));
+      toast(waiting.length === miss.length ? 'The missing fields are awaiting approval. Verify after the administrator approves them.'
+        : `Fill these before verifying: ${miss.map(FL.label).join(', ')}.`, true);
+      if (waiting.length < miss.length) {
+        S.editSecs.add('posting'); drawProfile();
+        const first = $(`#scrim [data-f="${CSS.escape(miss.find(f => !waiting.includes(f)))}"]`); first && first.focus();
+      }
+      return;
+    }
+    const b = busy('Saving verification…', false, 'save');
+    try {
+      const r = await guard(() => API.call('verify', { cadre: o.cadre, id: o.id, circle: o.data.Circle, division: o.data.Division, level, operator: op() }));
+      const full = r.level !== 'posting';
+      Object.assign(o.data, { Verification: r.verification || (full ? V_ALL : V_POSTING), 'Last Updated By': r.verifiedBy, 'Last Updated On': r.verifiedOn });
+      if (o.status !== 'pending') o.status = full ? 'verified' : 'partial';
+      delete S.hist[o.cadre + '|' + o.id];
+      bumpCounts(o);
+      b.done(); closeProfile(true);
+      toast(r.unchanged ? `${FL.cleanName(o.data.Name)}: all details were already verified.`
+        : full ? `${FL.cleanName(o.data.Name)}: all details verified.` : `${FL.cleanName(o.data.Name)}: posting and home district verified.`);
+      (S.div.after || drawDivision)(o.cadre + '|' + o.id);
+    } catch (e) { b.done(); }
+  }
+
+  async function submitEdits(o) {
+    const changes = Object.entries(S.edits).map(([field, value]) => ({ field, value }));
+    if (!changes.length) return;
+    if (S.edits.Division !== undefined && S.edits.Division !== o.data.Division) {
+      if (!S.edits.Division) { toast('Choose the new division.', true); return; }
+      if (!S.edits['Division Date']) { toast('This is a transfer: enter the date of joining the new division (Division date).', true); return; }
+      if (S.edits.Circle && S.edits.Circle !== o.data.Circle && !S.edits['Circle Date']) { toast('This is a transfer to another circle: enter the Circle date too.', true); return; }
+    }
+    // a correction marks the officer verified only when every required field will be filled
+    const left = FL.missing(Object.assign({}, o.data, S.edits), S.div.schema[o.cadre].map(f => f.name));
+    if (left.length && !confirm(`Still blank: ${left.map(FL.label).join(', ')}.\n\nThe correction will be sent, but the officer stays not verified until these are filled. Send anyway?`)) return;
+    if (!left.length && !changes.some(c => c.field === 'Verification')) changes.push({ field: 'Verification', value: 'Corrected' });
+    const b = busy('Sending for approval…', false, 'save');
+    try {
+      const r = await guard(() => API.call('submit', { cadre: o.cadre, id: o.id, circle: o.data.Circle, division: o.data.Division, changes, operator: op() }));
+      o.pending = (o.pending || []).concat(changes.map(c => ({ field: c.field, value: c.value, by: (op() || {}).name, on: 'now' })));
+      o.status = 'pending'; bumpCounts(o, 'pending'); delete S.hist[o.cadre + '|' + o.id];
+      b.done(); S.edits = {}; S.editSecs = new Set(); closeProfile(true);
+      toast(`Sent for approval (${r.count} change${r.count > 1 ? 's' : ''}).`);
+      (S.div.after || drawDivision)(o.cadre + '|' + o.id);
+    } catch (e) { b.done(); }
+  }
+
+  function bumpCounts(o, to) {
+    const c = S.meta && S.meta.counts && S.meta.counts[o.data.Circle + '|' + o.data.Division];
+    if (!c || S.div.after) { if (S.meta) S.meta.stale = true; return; }
+    const n = { verified: 0, partial: 0, pending: 0 }; S.div.officers.forEach(x => { if (!x.incoming && n[x.status] != null) n[x.status]++; });
+    Object.assign(c, n);
+  }
+
+  async function pdfOne(o, quiet) {
+    if (!window.pdfMake) { toast('The PDF tool is still loading. Please try again in a moment.', true); return; }
+    const b = quiet ? null : busy('Preparing the information sheet…', false, 'pdf');
+    try { const name = await PDF.officer(o, S.div.schema[o.cadre]); if (!quiet) toast('Downloaded ' + name); }
+    catch (e) { toast('Could not make the PDF: ' + e.message, true); }
+    finally { b && b.done(); }
+  }
+
+  async function downloadAll() {
+    if (!window.pdfMake) { toast('The PDF tool is still loading. Please try again in a moment.', true); return; }
+    const list = S.div.officers.slice().sort((a, b) => ['FR', 'DFR', 'FG'].indexOf(a.cadre) - ['FR', 'DFR', 'FG'].indexOf(b.cadre));
+    const b = busy(`Preparing ${list.length} information sheets…`, true);
+    try { const name = await PDF.division(list, S.div.schema, S.div.circle, S.div.division, b.set); toast('Downloaded ' + name); }
+    catch (e) { toast('Could not make the PDF: ' + e.message, true); }
+    finally { b.done(); }
+  }
+
+  function newOfficerHtml(json) {
+    let d = {}; try { d = JSON.parse(json); } catch (e) { return esc(json); }
+    return `<div class="newoff">${Object.entries(d).filter(([k]) => !['Circle', 'Division'].includes(k)).map(([k, v]) => `<span><em>${esc(FL.label(k))}</em> ${esc(v)}</span>`).join('')}</div>`;
+  }
+
+  /* ---------------- admin ---------------- */
+  async function renderAdmin(status) {
+    await ensureMeta();
+    if (!S.meta.user || !S.meta.user.isAdmin) { app.innerHTML = '<div class="empty-state"><b>Approvals are for administrators.</b>Ask the PMC cell if you need access.</div>'; return; }
+    status = status || 'Pending';
+    app.innerHTML = `<div class="crumbs"><a href="#/circles">All circles</a><span class="sep">/</span><span>Approvals</span></div>
+      <div class="head"><div><h1 class="page-title">Approvals.</h1><p class="page-sub">Changes sent by divisions. Approved changes are written to the master sheet.</p></div>
+        <span class="sp"></span><button class="btn" id="refreshData" title="Use after editing the Google Sheet by hand">↻ Refresh data from sheet</button></div>
+      <div class="kpis" id="kpis">${'<div class="skeleton" style="height:76px"></div>'.repeat(4)}</div>
+      <div class="toolbar"><div class="chips">${['Pending', 'Approved', 'Rejected', 'All'].map(s => `<button class="chip${s === status ? ' on' : ''}" data-s="${s}">${s}</button>`).join('')}</div>
+        <label class="search">${icon.search}<input id="aq" placeholder="Search officer, operator or field"></label>
+        ${status === 'Pending' ? '<button class="btn primary" id="approveAll" hidden></button>' : ''}</div>
+      <div id="alist">${loaderHtml('admin')}</div>`;
+    animateLoader(app);
+    app.querySelectorAll('[data-s]').forEach(b => b.onclick = () => renderAdmin(b.dataset.s));
+    $('#refreshData').onclick = async () => {
+      const bz = busy('Reading the Google Sheet again… this can take up to a minute.');
+      try { const r = await guard(() => API.call('adminRefresh')); S.meta = null; toast(`Data refreshed (${r.divisions} divisions).`); }
+      catch (e) {} finally { bz.done(); }
+    };
+    let sum, rows;
+    try { ({ summary: sum, rows } = await API.call('adminQueue', { filter: { status } })); }
+    catch (e) {   // API not redeployed yet: the older two calls
+      if (!/Unknown action/.test(e.message || '')) { guard(() => Promise.reject(e)).catch(() => {}); return; }
+      [sum, rows] = await Promise.all([guard(() => API.call('adminSummary')), guard(() => API.call('adminChanges', { filter: { status } }))]);
+    }
+    const kpis = () => { $('#kpis').innerHTML = [['Changes waiting', sum.pending], ['Submissions waiting', sum.submissions], ['Approved so far', sum.approved], ['Rejected so far', sum.rejected]]
+      .map(([l, n]) => `<div class="kpi"><span>${l}</span><b>${n}</b></div>`).join(''); };
+    kpis();
+    // apply a decision on screen instead of reloading the whole queue
+    const settle = r => {
+      if (!r.done) { S.meta = null; renderAdmin(status); return; }   // older API: reload the queue
+      const done = r.done;
+      rows.forEach(x => { if (done[x.changeId]) x.status = done[x.changeId]; });
+      if (status === 'Pending') rows = rows.filter(x => x.status === 'Pending');
+      sum.pending = Math.max(0, sum.pending - (r.applied || 0) - (r.rejected || 0));
+      sum.approved += r.applied || 0; sum.rejected += r.rejected || 0;
+      if (status === 'Pending' || status === 'All') sum.submissions = new Set(rows.filter(x => x.status === 'Pending').map(x => x.submissionId)).size;
+      kpis(); S.meta = null; try { Object.keys(sessionStorage).filter(k => k.indexOf('upmc_div_') === 0).forEach(k => sessionStorage.removeItem(k)); } catch (e) {}
+      const extra = [];
+      if (r.conflicts && r.conflicts.length) extra.push(`${r.conflicts.length} skipped because the sheet changed after they were sent`);
+      if (r.errors && r.errors.length) extra.push(`${r.errors.length} could not be applied: ${r.errors.slice(0, 2).join('; ')}`);
+      if (extra.length) toast(extra.join('. ') + '.', true);
+      draw();
+    };
+    const draw = () => {
+      const q = $('#aq').value.trim().toLowerCase();
+      const list = rows.filter(x => !q || [x.officer, x.name, x.field, x.division, x.email].join(' ').toLowerCase().includes(q));
+      const all = $('#approveAll');
+      if (all) {
+        const pend = list.filter(x => x.status === 'Pending'), nSub = new Set(pend.map(x => x.submissionId)).size;
+        all.hidden = !pend.length;
+        all.innerHTML = `${icon.check} Approve all ${pend.length}${q ? ' shown' : ''}`;
+        all.title = `Approve ${pend.length} change(s) in ${nSub} submission(s)`;
+        all.onclick = () => approveAll(pend);
+      }
+      if (!list.length) { $('#alist').innerHTML = `<div class="empty-state"><b>${status === 'Pending' ? 'Nothing is waiting for approval.' : 'Nothing here.'}</b></div>`; return; }
+      const subs = {}; list.forEach(x => (subs[x.submissionId] = subs[x.submissionId] || []).push(x));
+      $('#alist').innerHTML = Object.entries(subs).map(([sid, g]) => {
+        const f = g[0], pend = g.filter(x => x.status === 'Pending');
+        const dv = g.find(x => x.field === 'Division'), cc = g.find(x => x.field === 'Circle');
+        const transfer = dv && dv.oldValue !== dv.newValue ? `<span class="pill attn">Transfer: ${esc(dv.oldValue)} → ${esc(dv.newValue)}${cc ? ` (${esc(cc.oldValue)} → ${esc(cc.newValue)})` : ''}</span>` : '';
+        return `<div class="subm"><div class="sh">
+          <div style="flex:1;min-width:240px">${transfer ? transfer + '<br>' : ''}<b style="color:var(--ink)">${esc(f.officer)}</b> <span class="faint">· ${esc(f.cadre)} · HRMS ${esc(f.id)} · ${esc(f.division)}, ${esc(f.circle)}</span>
+            <div class="faint">Sent by ${esc(f.name)}${f.designation ? ', ' + esc(f.designation) : ''} · ${esc(f.email)} · ${esc(f.on)}</div></div>
+          ${pend.length ? `<button class="btn sm" data-dec="reject" data-sid="${esc(sid)}">Reject</button><button class="btn sm primary" data-dec="approve" data-sid="${esc(sid)}">Approve ${pend.length}</button>` : ''}</div>
+          <table><tr><th>Field</th><th>Change</th><th>Status</th></tr>${g.map(x => `<tr><td>${x.type === 'Add' ? '<b>New officer</b>' : esc(FL.label(x.field))}</td>
+            <td>${x.type === 'Add' ? newOfficerHtml(x.newValue) : `<span class="old">${esc(x.oldValue || '(blank)')}</span> → <span class="new">${esc(x.newValue || '(blank)')}</span>`}${x.conflict ? `<div class="conflict">The sheet now says “${esc(x.current || '(blank)')}”. It changed after this was sent.</div>` : ''}</td>
+            <td><span class="pill ${x.status === 'Approved' ? 'verified' : x.status === 'Rejected' ? 'attn' : 'pending'}">${esc(x.status)}</span></td></tr>`).join('')}</table></div>`;
+      }).join('');
+      app.querySelectorAll('[data-dec]').forEach(b => b.onclick = async () => {
+        const g = subs[b.dataset.sid].filter(x => x.status === 'Pending'), approve = b.dataset.dec === 'approve';
+        const conflict = g.some(x => x.conflict);
+        let note = '';
+        if (!approve) { note = prompt('Reason for rejecting (optional):', '') ; if (note === null) return; }
+        else if (!confirm(`Approve ${g.length} change(s) for ${g[0].officer}?${conflict ? `\n\nThese will replace a different value now in the sheet:\n\n${conflictLines(g.filter(x => x.conflict))}` : ''}`)) return;
+        const bz = busy(approve ? 'Writing to the master sheet…' : 'Rejecting…');
+        try {
+          const r = await guard(() => API.call('adminDecide', { ids: g.map(x => x.changeId), decision: approve ? 'approve' : 'reject', note, force: conflict }));
+          toast(approve ? `${r.applied} change(s) approved.` : `${r.rejected} change(s) rejected.`);
+          bz.done(); settle(r);
+        } catch (e) { bz.done(); }
+      });
+    };
+    const conflictLines = list => list.slice(0, 8).map(x => `• ${x.officer} – ${FL.label(x.field)}: sheet has “${x.current || '(blank)'}”, change says “${x.newValue || '(blank)'}”`).join('\n') + (list.length > 8 ? `\n…and ${list.length - 8} more` : '');
+    async function approveAll(pend) {
+      const nSub = new Set(pend.map(x => x.submissionId)).size, con = pend.filter(x => x.conflict), nCon = con.length;
+      if (!confirm(`Approve all ${pend.length} change(s) in ${nSub} submission(s)?\n\nThey will be written to the master sheet.`)) return;
+      let force = false;
+      if (nCon) force = confirm(`${nCon} change(s) would replace a different value now in the sheet:\n\n${conflictLines(con)}\n\nOK: overwrite those too.\nCancel: skip them (they stay waiting) and approve the rest.`);
+      // send whole submissions together, about 150 changes per call
+      const bySub = {}; pend.forEach(x => (bySub[x.submissionId] = bySub[x.submissionId] || []).push(x.changeId));
+      const batches = [[]]; Object.values(bySub).forEach(g => { if (batches[batches.length - 1].length + g.length > 150 && batches[batches.length - 1].length) batches.push([]); batches[batches.length - 1].push(...g); });
+      const bz = busy(`Approving ${pend.length} change(s)…`, batches.length > 1);
+      const total = { applied: 0, rejected: 0, conflicts: [], errors: [], done: {} };
+      try {
+        for (let i = 0; i < batches.length; i++) {
+          const r = await guard(() => API.call('adminDecide', { ids: batches[i], decision: 'approve', force }));
+          total.applied += r.applied; total.conflicts.push(...(r.conflicts || [])); total.errors.push(...(r.errors || [])); Object.assign(total.done, r.done || {});
+          bz.set((i + 1) / batches.length);
+        }
+        toast(`${total.applied} change(s) approved.`);
+      } catch (e) {} finally { bz.done(); settle(total); }
+    }
+    $('#aq').oninput = draw; draw();
+  }
+
+  window.UPMC_APP = { S, esc, icon, busy, loaderHtml, animateLoader, toast, guard, openProfile, ensureMeta, TICK, TICK_P, tickOf, STATUS_TXT, pdfOne, smallDialog };
+
+  /* ---------------- router ---------------- */
+  async function route() {
+    if (!API.user) { renderWho(); renderSignin(); return; }
+    if (!op()) { renderOperator(false); return; }
+    renderWho();
+    const parts = location.hash.replace(/^#\/?/, '').split('?')[0].split('/').map(decodeURIComponent);
+    try {
+      if (parts[0] === 'c' && parts[1]) await renderDivisions(parts[1]);
+      else if (parts[0] === 'd' && parts[2]) await renderDivision(parts[1], parts[2]);
+      else if (parts[0] === 'admin') await renderAdmin();
+      else if (parts[0] === 'dash') { await ensureMeta(); await window.UPMC_DASH.render(app); }
+      else if (parts[0] === 'report') { await ensureMeta(); await window.UPMC_REPORT.render(app); }
+      else await renderCircles();
+    } catch (e) { /* toast already shown */ }
+    window.scrollTo(0, 0);
+  }
+  function render() { route(); }
+  window.addEventListener('hashchange', () => { if (S.open) closeProfile(true); route(); });
+  if (API.user) start(); else route();
+})();
