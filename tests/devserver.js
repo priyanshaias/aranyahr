@@ -19,6 +19,6 @@ http.createServer((req, res) => {
   const url = decodeURIComponent(req.url.split('?')[0]), file = path.join(docs, url === '/' ? 'index.html' : url);
   if (!file.startsWith(docs) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404); res.end('Not found'); return; }
   let body = fs.readFileSync(file);
-  if (url === '/js/config.js') body = String(body).replace("API_URL: ''", "API_URL: '/api'");
+  if (url === '/js/config.js') body = String(body).replace(/API_URL: '[^']*'/, "API_URL: '/api'");   // always the made-up sheets
   res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store' }); res.end(body);
 }).listen(port, () => console.log('AranyaHR dev server on http://localhost:' + port + (T.mail.length ? '' : '')));
