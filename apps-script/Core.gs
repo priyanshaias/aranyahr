@@ -178,6 +178,8 @@ function nameIn_(m, circle, division) {
   const d = divs_().find(x => x.circle === circle && x.division === division);
   return (d && d[m]) || { circle, division };
 }
+/** The division's names in every module's sheet, for the website to open each page at it. */
+function ownAll_(circle, division) { return Object.keys(MOD_COL).reduce((a, m) => (a[m] = nameIn_(m, circle, division), a), {}); }
 /** The AranyaHR division for a module's own names. */
 function canonOf_(m, circle, division) {
   return divs_().find(x => x[m] && x[m].division === division && (!circle || x[m].circle === circle)) || null;
@@ -246,7 +248,9 @@ function hrLogin_(body) {
       const set = { last: hrNow_() };
       if (!r.password) Object.assign(set, { password: pw, oldSalt: '', oldHash: '' });   // moved from CDL+BS: keep the password from now on
       setCells_(t, r, set);
-      return userObj_(r);
+      const o = userObj_(r);
+      if (o.level === 'Division') o.own = ownAll_(o.circle, o.division);
+      return o;
     });
     cache.remove('hr:off|' + u);
   }
@@ -428,7 +432,7 @@ function home_(body, user) {
     const own = nameIn_(m, d.circle, d.division);
     modules_()[m].people(own.circle, own.division).forEach(p => { p.mod = m; p.rawRange = p.range; p.range = canonRange_(d.division, p.range, ranges); people.push(p); });
   });
-  return { circle: d.circle, division: d.division, people, ranges: (ranges[d.division] || []).map(x => x.range), lists: lists_() };
+  return { circle: d.circle, division: d.division, own: ownAll_(d.circle, d.division), people, ranges: (ranges[d.division] || []).map(x => x.range), lists: lists_() };
 }
 /** Every division with each cadre's counts: {total, done} (done = verified / complete). */
 function overview_(body, user) {

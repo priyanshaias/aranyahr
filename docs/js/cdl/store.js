@@ -27,7 +27,7 @@
   // Ban Sahayaks: no return to start from, engaged directly, pay fixed
   const BS_PAY = 12000;
   const REQUIRED_BS = ['name', 'date', 'district', 'range', 'place', 'duty'];
-  const CADRES = { CDL: 'DL / CDL', BS: 'Ban Sahayak' };
+  const CADRES = { CDL: 'DL / CDL', BS: 'Ban Sahayak', AS: 'Aranya Sathi', DEO: 'DEO' };
   const VAGUE = /^\s*(do|d\.o\.?|various|variouss|misc\.?|miscellaneous|other|others|field work|field duty|forestry work|general|all work|-)?\s*$/i;
 
   let st = null;
@@ -87,7 +87,7 @@
     deviceTimer = setTimeout(() => {
       try {
         const divs = Object.keys(st.loaded).sort((a, b) => st.loaded[b] - st.loaded[a]).slice(0, 3), d = {};
-        divs.forEach(x => { d[x] = { rows: st.people.filter(p => p.division === x), certs: { CDL: st.certified[ck(x, 'CDL')] || null, BS: st.certified[ck(x, 'BS')] || null } }; });
+        divs.forEach(x => { d[x] = { rows: st.people.filter(p => p.division === x), certs: Object.keys(CADRES).reduce((a, k) => (a[k] = st.certified[ck(x, k)] || null, a), {}) }; });
         localStorage.setItem(DKEY(), JSON.stringify({ meta: st.meta, divs: d }));
       } catch (e) { /* full or blocked: the next visit simply loads from the API */ }
     }, 400);
@@ -99,14 +99,14 @@
       st.meta = c.meta || null;
       Object.keys(c.divs || {}).forEach(x => {
         st.people = st.people.concat(c.divs[x].rows.map(normal)); st.loaded[x] = 1;
-        ['CDL', 'BS'].forEach(k => { if (c.divs[x].certs[k]) st.certified[ck(x, k)] = c.divs[x].certs[k]; });
+        Object.keys(CADRES).forEach(k => { if (c.divs[x].certs[k]) st.certified[ck(x, k)] = c.divs[x].certs[k]; });
       });
     } catch (e) { /* ignore a damaged copy */ }
   }
   async function loadDivision(div) {
     const res = await API.call('load', { division: div });
     st.people = st.people.filter(p => p.division !== div).concat(res.rows.map(normal));
-    ['CDL', 'BS'].forEach(c => { if (res.certs[c]) st.certified[ck(div, c)] = res.certs[c]; else delete st.certified[ck(div, c)]; });
+    Object.keys(CADRES).forEach(c => { if (res.certs[c]) st.certified[ck(div, c)] = res.certs[c]; else delete st.certified[ck(div, c)]; });
     st.loaded[div] = Date.now(); toDevice();
   }
   async function loadMeta() { st.meta = await API.call('meta'); st.metaAt = Date.now(); toDevice(); }
@@ -146,7 +146,7 @@
     const l = st.log.find(x => x.id === id && x.type === 'Edit' && x.field === LABEL[f]); return l ? { by: l.by, on: l.on } : null;
   }
   // certificates are kept per division and cadre (DL / CDL keeps the plain division name)
-  const ck = (div, cadre) => cadre === 'BS' ? div + ' · BS' : div;
+  const ck = (div, cadre) => cadre && cadre !== 'CDL' ? div + ' · ' + cadre : div;
   const locked = (div, cadre) => !!st.certified[ck(div, cadre)];
 
   /** Saves changed fields. A confirmed person stays confirmed only while still complete. */
@@ -211,12 +211,12 @@
     else { log(p, 'Problem resolved', '', '', 'Different people'); save(); }
   }
 
-  /** A DL / CDL not in the list waits for the admin; Ban Sahayaks are entered by the division and count straight away. */
+  /** A DL / CDL not in the list waits for the admin; Ban Sahayaks, Aranya Sathis and DEOs are entered by the division and count straight away. */
   function addPerson(d) {
-    const bs = d.cadre === 'BS', id = (bs ? 'BS-' : 'NEW-') + hex8();
-    const p = Object.assign({ id, cadre: 'CDL', ver: '', state: bs ? 'active' : 'add-pending', flag: '', other: [], mode: '', agency: '', beat: '', placeName: '', details: '',
+    const bs = d.cadre === 'BS', direct = !!d.cadre && d.cadre !== 'CDL', id = (direct ? d.cadre + '-' : 'NEW-') + hex8();
+    const p = Object.assign({ id, cadre: 'CDL', ver: '', state: direct ? 'active' : 'add-pending', flag: '', other: [], mode: '', agency: '', beat: '', placeName: '', details: '',
       updOn: now(), updBy: st.user.name }, d, bs ? { mode: 'Direct', agency: '', pay: BS_PAY } : {});
-    st.people.push(p); log(p, 'Added', '', '', bs ? 'Ban Sahayak' : 'New person');
+    st.people.push(p); log(p, 'Added', '', '', direct ? CADRES[d.cadre] : 'New person');
     send('add', { person: Object.assign({}, p) }, p.division);
     save(); return p;
   }

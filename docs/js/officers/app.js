@@ -290,12 +290,13 @@
   }
 
   function drawDivision(flashId) {
-    const D = S.div, list = D.officers;
+    const D = S.div, list = D.officers.filter(o => window.HR_API.inRange('off', o.id, D.division));   // the range chosen on the AranyaHR home page
     const n = { verified: 0, partial: 0, pending: 0, unverified: 0 }; list.forEach(o => n[o.status]++);
     const cadres = ['FR', 'DFR', 'FG'].filter(c => list.some(o => o.cadre === c));
     app.innerHTML = `<div class="crumbs"><a href="#/circles">All circles</a><span class="sep">/</span><a href="#/c/${encodeURIComponent(D.circle)}">${esc(D.circle)}</a><span class="sep">/</span><span>${esc(D.division)}</span></div>
       <div class="head"><div><h1 class="page-title">${esc(D.division)}</h1><p class="page-sub">${esc(D.circle)} circle · ${list.length} officers. Open each card, check the details and verify.</p></div>
         <span class="sp"></span><button class="btn soft" id="allPdf" ${list.length ? '' : 'disabled'}>${icon.down} Download all PDFs</button></div>
+      ${window.HR_API.rangeBar('off', D.division)}
       <div class="progress"><div><div class="big">${n.verified} of ${list.length}</div><div class="faint">fully verified${n.partial ? ` · ${n.partial} posting only` : ''}</div></div>
         <div class="bar"><i class="v" style="width:${pct(n.verified, list.length)}%"></i><i class="h" style="width:${pct(n.partial, list.length)}%"></i><i class="p" style="width:${pct(n.pending, list.length)}%"></i></div>
         <div class="legend"><span style="--c:var(--prelims)">All verified ${n.verified}</span><span style="--c:#8fd19e">Posting verified ${n.partial}</span><span style="--c:var(--interview)">Awaiting approval ${n.pending}</span><span style="--c:var(--border-strong)">Not verified ${n.unverified}</span></div></div>

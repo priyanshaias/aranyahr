@@ -692,7 +692,8 @@ function divisions_() { const out = []; readLists_().circles.forEach(c => c.divi
 
 return {
   actions: { meta: meta_, division: division_, verify: verify_, submit: submit_, addOfficer: addOfficer_, search: search_, history: history_,
-    adminSummary: adminSummary_, adminChanges: adminChanges_, adminQueue: adminQueue_, adminDecide: adminDecide_, adminRefresh: adminRefresh_, adminData: adminData_ },
+    // these two take the Change Log as their second argument, so the user is not passed on
+    adminSummary: body => adminSummary_(body), adminChanges: body => adminChanges_(body), adminQueue: adminQueue_, adminDecide: adminDecide_, adminRefresh: adminRefresh_, adminData: adminData_ },
   admin: ['adminSummary', 'adminChanges', 'adminQueue', 'adminDecide', 'adminRefresh', 'adminData'],
   writes: ['verify', 'submit', 'addOfficer'],
   people: people_, counts: counts_, divisions: divisions_, setup, warm: keepWarm,

@@ -10,23 +10,32 @@
     'Human-Animal Conflict Management': 'Human-Animal Conflict', 'Night Guard/Security': 'Night Guard / Security' };
   const short = d => SHORT[d] || d;
 
+  // cdl.html shows DL / CDL and Ban Sahayaks; cdl.html?set=sathi shows Aranya Sathis and DEOs (the same screens and columns).
+  // Everyone but DL / CDL is added by the division and counts straight away; only Ban Sahayaks have a fixed pay.
+  const SET = /[?&]set=sathi\b/.test(location.search) ? ['AS', 'DEO'] : ['CDL', 'BS'];
+  const NAMES = { CDL: ['person', 'people', 'DL / CDL', 'a person'], BS: ['Ban Sahayak', 'Ban Sahayaks', 'Ban Sahayaks', 'a Ban Sahayak'],
+    AS: ['Aranya Sathi', 'Aranya Sathis', 'Aranya Sathis', 'an Aranya Sathi'], DEO: ['DEO', 'DEOs', 'DEOs', 'a DEO'] };
+  const CKEY = SET[0] === 'AS' ? 'cdl-cadre-sathi' : 'cdl-cadre';
+  if (SET[0] === 'AS') { document.title = 'Aranya Sathi, DEO · AranyaHR'; $('#setName').textContent = 'Aranya Sathi and DEO'; }
+
   // view state for the division page
   // keep: people edited under the current filter stay in view until the filter changes
   // edit: the row being edited in the table { id, d: draft, newRange }
   // cadre: the tab in view (DL / CDL or Ban Sahayak); track: show what changed from the return (off unless switched on)
-  const ui = { div: '', filter: 'all', range: '', q: '', edit: null, keep: new Set(), steps: true, cadre: 'CDL', track: false };
+  const ui = { div: '', filter: 'all', range: '', q: '', edit: null, keep: new Set(), steps: true, cadre: SET[0], track: false };
   try {
     ui.steps = localStorage.getItem('cdl-steps') !== 'off';
-    ui.cadre = localStorage.getItem('cdl-cadre') === 'BS' ? 'BS' : 'CDL';
+    ui.cadre = SET.includes(localStorage.getItem(CKEY)) ? localStorage.getItem(CKEY) : SET[0];
     ui.track = localStorage.getItem('cdl-track') === 'on';
   } catch (e) { /* keep defaults */ }
   const remember = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* fine */ } };
   const isBS = () => ui.cadre === 'BS';
-  const people = n => isBS() ? (n === 1 ? 'Ban Sahayak' : 'Ban Sahayaks') : (n === 1 ? 'person' : 'people');
+  const direct = () => ui.cadre !== 'CDL';   // added by the division
+  const people = n => NAMES[ui.cadre][n === 1 ? 0 : 1];
   // DL / CDL | Ban Sahayak tabs; inScope picks the divisions counted (all, one circle, one division)
   function tabs(inScope) {
     const n = c => S.divisions(c).filter(inScope).reduce((a, d) => a + d.counts.active, 0);
-    return `<div class="tabs" role="tablist">${[['CDL', 'DL / CDL'], ['BS', 'Ban Sahayaks']].map(([c, t]) =>
+    return `<div class="tabs" role="tablist">${SET.map(c => [c, NAMES[c][2]]).map(([c, t]) =>
       `<button role="tab" aria-selected="${ui.cadre === c}" class="tab ${ui.cadre === c ? 'on' : ''}" data-act="cadre" data-v="${c}">${t}<span class="k">${n(c).toLocaleString('en-IN')}</span></button>`).join('')}</div>`;
   }
 
@@ -47,7 +56,7 @@
     $('#nav').innerHTML = u && u.role === 'admin' ? [
       ['#/', 'Dashboard', h === '#/' || h === ''], ['#/divisions', 'Divisions', h.startsWith('#/divisions') || h.startsWith('#/d/') || h.startsWith('#/c/')],
       ['#/approvals', 'Approvals' + (S.pendingCount ? `<span class="count">${S.pendingCount}</span>` : ''), h === '#/approvals'],
-      ['#/users', 'Users', h === '#/users'], ['#/log', 'Changes', h === '#/log']].map(([href, t, on]) => `<a href="${href}" class="${on ? 'on' : ''}">${t}</a>`).join('') : '';
+      ['index.html#/users', 'Users', false], ['#/log', 'Changes', h === '#/log']].map(([href, t, on]) => `<a href="${href}" class="${on ? 'on' : ''}">${t}</a>`).join('') : '';
     $('#who').innerHTML = u ? `<button class="menu-btn" data-act="menu"><span class="av">${esc(u.name.split(' ').map(w => w[0]).join('').slice(0, 2))}</span><span class="hide-sm">${esc(u.name)}</span></button>` : '';
   }
   function menu() {
@@ -59,7 +68,7 @@
 
   /* ------------------------------------------------------------ login */
   function login() {
-    if (S.LIVE) { authScreen(); return; }
+    if (S.LIVE) { location.href = 'index.html'; return; }   // AranyaHR signs in
     app.innerHTML = `<div class="login card">
       <h1>Sign in</h1><p class="muted">DL / CDL and Ban Sahayak details and duties, division by division.</p>
       <div class="banner info">This is the demo: the names are made up and changes stay in this browser. Choose how you want to see it.</div>
@@ -73,7 +82,7 @@
   function divCard(d) {
     const k = d.counts;
     return `<a class="div-card" href="#/d/${enc(d.division)}"><h3>${esc(d.division)}</h3>
-      ${!k.all && isBS() ? '<div class="muted">No Ban Sahayaks added yet</div><div class="bar"></div><div class="faint">Open to add them</div>' : `
+      ${!k.all && direct() ? '<div class="muted">No ' + NAMES[ui.cadre][1] + ' added yet</div><div class="bar"></div><div class="faint">Open to add them</div>' : `
       <div class="muted">${k.active} ${people(k.active)} · <b style="color:var(--ink)">${k.confirmed}</b> verified</div>${bar(k)}
       <div class="faint">${d.certified ? '✔ Certified by ' + esc(d.certified.name) + ' on ' + esc(d.certified.on.slice(0, 10)) : k.missing + ' missing info · ' + k.ready + ' ready · ' + k.problem + ' problem'}</div>`}</a>`;
   }
@@ -95,7 +104,7 @@
       <div class="head"><div class="grow"><h1>${esc(c)} circle</h1><p class="muted">${ds.length} divisions</p></div>${legend}</div>
       ${tabs(d => d.circle === c)}
       <div class="kpis">
-        <div class="kpi"><div class="v num">${(t.active || 0).toLocaleString('en-IN')}</div><div class="l">${isBS() ? 'Ban Sahayaks' : 'People working'}</div></div>
+        <div class="kpi"><div class="v num">${(t.active || 0).toLocaleString('en-IN')}</div><div class="l">${direct() ? NAMES[ui.cadre][1] : 'People working'}</div></div>
         <div class="kpi"><div class="v num" style="color:var(--good-ink)">${t.confirmed || 0}</div><div class="l">Verified</div></div>
         <div class="kpi"><div class="v num" style="color:var(--warn-ink)">${t.missing || 0}</div><div class="l">Missing info</div></div>
         <div class="kpi"><div class="v num" style="color:var(--bad-ink)">${t.problem || 0}</div><div class="l">Problems</div></div>
@@ -120,9 +129,9 @@
     if (ui.div !== div) Object.assign(ui, { div, filter: 'all', range: '', q: '', edit: null, keep: new Set() });
     const info = S.divisions().find(d => d.division === div);
     if (!info) { app.innerHTML = '<p>Division not found. <a href="#/">Back</a></p>'; return; }
-    const all = S.people(div, ui.cadre), bs = isBS();
+    const all = S.people(div, ui.cadre).filter(p => window.HR_API.inRange('cdl', p.id, div)), bs = direct();
     const c = S.counts(all), cert = S.certifiedBy(div, ui.cadre), mine = canEdit(div), lock = !!cert || !mine;
-    const addBtn = lock ? '' : `<button class="btn soft" data-act="add">${bs ? '+ Add a Ban Sahayak' : '+ Add a person not in the list'}</button>`;
+    const addBtn = lock ? '' : `<button class="btn soft" data-act="add">${bs ? '+ Add ' + NAMES[ui.cadre][3] : '+ Add a person not in the list'}</button>`;
     const rc = S.counts(ui.range ? all.filter(p => p.range === ui.range) : all);
     const ranges = [...new Set(all.map(p => p.range).filter(Boolean))].sort();
     const list = visible();
@@ -137,11 +146,13 @@
         <div class="prog card"><div class="row" style="justify-content:space-between"><div><span class="big num">${c.confirmed}</span> <span class="muted">of ${c.active} verified</span></div>
           ${lock ? '' : `<button class="btn sm ${S.canCertify(div, ui.cadre) ? 'good' : ''}" data-act="certify" ${S.canCertify(div, ui.cadre) ? '' : 'disabled title="Verify everyone first"'}>Certify list</button>`}</div>${bar(c)}${legend}</div></div>
       ${tabs(d => d.division === div)}
-      ${mine ? '' : `<div class="banner info" style="margin-bottom:14px">You are looking at ${esc(div)}. You can change only <a href="#/d/${enc(S.user.division)}">${esc(S.user.division)}</a>, your own division.</div>`}
+      ${window.HR_API.rangeBar('cdl', div)}
+      ${mine ? '' : S.user.viewOnly ? `<div class="banner info" style="margin-bottom:14px">You are looking at ${esc(div)}. Your account can only view; the division makes the changes.</div>`
+        : `<div class="banner info" style="margin-bottom:14px">You are looking at ${esc(div)}. You can change only <a href="#/d/${enc(S.user.division)}">${esc(S.user.division)}</a>, your own division.</div>`}
       ${cert ? `<div class="cert" style="margin-bottom:14px">✔ Certified by ${esc(cert.name)}, ${esc(cert.desig)} on ${esc(cert.on)}. The list is locked.
           <div class="row" style="margin-top:8px"><button class="btn sm" data-act="print">Print certified list</button>${S.user.role === 'admin' ? '<button class="btn sm ghost" data-act="reopen">Reopen for changes</button>' : ''}</div></div>` : ''}
       ${ui.steps && !lock ? `<div class="steps">
-        ${bs ? '<div class="step"><b><span class="n">1</span>Add your Ban Sahayaks</b>“+ Add a Ban Sahayak”. “Add &amp; next” keeps the form open for the next one.</div>'
+        ${bs ? '<div class="step"><b><span class="n">1</span>Add your ' + NAMES[ui.cadre][1] + '</b>“+ Add ' + NAMES[ui.cadre][3] + '”. “Add &amp; next” keeps the form open for the next one.</div>'
           : '<div class="step"><b><span class="n">1</span>Pick a range</b>Work one range at a time.</div>'}
         <div class="step"><b><span class="n">2</span>Fill what is orange</b>Press Edit on a row, fill it in the table, then Save.</div>
         <div class="step"><b><span class="n">3</span>Verify</b>Press Verify on the row. It works once everything is filled.</div>
@@ -156,7 +167,7 @@
       <div class="chips">${chips}${ui.track && !bs ? `<span class="chg-key"><i></i>${rc.changed ? 'Changed from the return — point at it to see the old value' : 'Nothing changed from the return yet'}</span>` : ''}</div>
       <div class="tbl-wrap"><table class="people"><thead><tr>
         <th>Name</th>${lock ? '' : '<th class="acts-col"></th>'}${bs ? '' : '<th>Mode</th>'}<th>Engaged</th><th>District</th><th>Range / Beat</th><th>Place of work</th><th>Main duty</th><th>Other duties</th><th style="text-align:right">Pay (Rs)</th><th>Remarks</th></tr></thead>
-        <tbody>${list.length ? list.map(p => rowHtml(p, lock)).join('') : `<tr><td colspan="12" class="empty-row">${bs && !all.length ? 'No Ban Sahayaks added yet. Press “+ Add a Ban Sahayak”.' : 'No one here with this filter.'}</td></tr>`}</tbody></table></div>
+        <tbody>${list.length ? list.map(p => rowHtml(p, lock)).join('') : `<tr><td colspan="12" class="empty-row">${bs && !all.length ? 'No ' + NAMES[ui.cadre][1] + ' added yet. Press “+ Add ' + NAMES[ui.cadre][3] + '”.' : 'No one here with this filter.'}</td></tr>`}</tbody></table></div>
       <div class="below"><div class="row">${addBtn}<span class="faint">${list.length} shown. Click a name to open all the details.</span></div>
         ${!lock && readyHere.length ? `<button class="btn good" data-act="confirm-ready">Verify all ${readyHere.length} ready${ui.range ? ' in ' + esc(ui.range) : ''}</button>` : ''}</div>
       `;
@@ -310,8 +321,8 @@
     const sel = (f, opts) => `<select data-f="${f}" ${dis}><option value="">— Choose —</option>${opts.map(o => `<option ${o === d[f] ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
 
     drawer.innerHTML = `
-      <div class="dr-head"><div style="flex:1;min-width:0"><h2>${p ? esc(p.name) : bs ? 'Add a Ban Sahayak' : 'Add a person'}</h2>
-        <div class="row" style="gap:6px;margin-top:3px">${bs ? '<span class="pill bs">Ban Sahayak</span>' : ''}${p ? pill(s, p) : bs ? '' : '<span class="pill added">New person</span>'}${p && p.updOn ? `<span class="faint">Last change ${esc(p.updOn)} by ${esc(p.updBy)}</span>` : ''}</div></div>
+      <div class="dr-head"><div style="flex:1;min-width:0"><h2>${p ? esc(p.name) : 'Add ' + NAMES[d.cadre][3]}</h2>
+        <div class="row" style="gap:6px;margin-top:3px">${d.cadre !== 'CDL' ? '<span class="pill bs">' + NAMES[d.cadre][0] + '</span>' : ''}${p ? pill(s, p) : d.cadre !== 'CDL' ? '' : '<span class="pill added">New person</span>'}${p && p.updOn ? `<span class="faint">Last change ${esc(p.updOn)} by ${esc(p.updBy)}</span>` : ''}</div></div>
         ${p ? `<button class="btn sm ghost" data-act="prev" ${i <= 0 ? 'disabled' : ''} aria-label="Previous">‹</button><button class="btn sm ghost" data-act="next" ${i < 0 || i >= dr.list.length - 1 ? 'disabled' : ''} aria-label="Next">›</button>` : ''}
         <button class="btn sm ghost" data-act="close" aria-label="Close">✕</button></div>
       <div class="dr-body">
@@ -414,14 +425,14 @@
   }
   function certifyModal() {
     const c = S.counts(S.people(ui.div, ui.cadre));
-    openModal(`<h2>Certify ${esc(ui.div)} — ${isBS() ? 'Ban Sahayaks' : 'DLs / CDLs'}</h2><p class="muted">${c.confirmed} ${people(c.confirmed)} verified. After this the list is locked; only the admin can reopen it.</p>
+    openModal(`<h2>Certify ${esc(ui.div)} — ${direct() ? NAMES[ui.cadre][1] : 'DLs / CDLs'}</h2><p class="muted">${c.confirmed} ${people(c.confirmed)} verified. After this the list is locked; only the admin can reopen it.</p>
       <div class="field"><label>Name of the DFO <span class="req">*</span></label><input type="text" id="cName"></div>
       <div class="field"><label>Designation <span class="req">*</span></label><input type="text" id="cDesig" value="DFO, ${esc(ui.div)}"></div>
-      <label class="check"><input type="checkbox" id="cOk"> I certify that the details of the ${isBS() ? 'Ban Sahayaks' : 'DLs / CDLs'} of this division are correct.</label>
+      <label class="check"><input type="checkbox" id="cOk"> I certify that the details of the ${direct() ? NAMES[ui.cadre][1] : 'DLs / CDLs'} of this division are correct.</label>
       <div class="acts"><button class="btn" data-act="mclose">Cancel</button><button class="btn good" data-act="cert-ok">Certify</button></div>`);
   }
   function printList() {
-    const what = isBS() ? 'Ban Sahayaks' : 'DLs / CDLs';
+    const what = direct() ? NAMES[ui.cadre][1] : 'DLs / CDLs';
     const cert = S.certifiedBy(ui.div, ui.cadre), list = S.people(ui.div, ui.cadre).filter(p => p.state !== 'remove-pending').sort((a, b) => (a.range + a.name).localeCompare(b.range + b.name));
     const w = window.open('', '_blank'); if (!w) { toast('Allow pop-ups to print'); return; }
     w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(ui.div)} — ${what}</title><style>body{font:12px Arial,sans-serif;margin:24px}h1{font-size:17px;margin:0}
@@ -482,184 +493,9 @@
     setTimeout(() => { node.textContent = text; node.classList.remove('out'); }, 220);
   }
 
-  /* ------------------------------------------------------------ sign in, sign up, forgot password (live) */
-  // view: signin | signup | verify | forgot | reset; form: the sign-up details kept for "Send a new code"
-  const auth = { view: 'signin', msg: '', email: '', form: null, lists: null };
-  const canEdit = div => !S.user || S.user.isAdmin || !S.user.division || S.user.division === div;
-  function authScreen() {
-    const v = auth.view, msg = auth.msg ? `<div class="banner good">${esc(auth.msg)}</div>` : '';
-    const f = (id, label, type = 'text', extra = '') => `<div class="field"><label for="${id}">${label}</label><input type="${type}" id="${id}" ${extra}></div>`;
-    const card = (title, sub, body, key, btn) => `<form class="login card" data-auth="${key}" novalidate>
-      <h1>${title}</h1>${sub ? `<p class="muted">${sub}</p>` : ''}${msg}${body}
-      <div class="err" id="aerr" role="alert"></div><button class="btn primary block" type="submit" id="ago">${btn}</button>`;
-    if (v === 'signup') {
-      if (!auth.lists) { app.innerHTML = loaderHtml('signup'); animateLoader(app); S.api.open('lists').then(d => { auth.lists = d.divisions; render(); }, x => { auth.msg = ''; app.innerHTML = `<div class="card"><p class="muted">${esc(x.message)}</p><button class="btn primary" data-act="retry">Try again</button></div>`; }); return; }
-      const circles = [...new Set(auth.lists.map(d => d.circle))];
-      const ff = auth.form || {};
-      app.innerHTML = card('Create an account', '', `
-        <div class="banner warn"><b>Only 1 person per division.</b> Please sign up for your own division.</div>
-        <div class="two"><div class="field"><label for="su-circle">Circle</label><select id="su-circle"><option value="">— Choose —</option>${circles.map(c => `<option ${c === ff.circle ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
-          <div class="field"><label for="su-division">Division</label><select id="su-division" ${ff.circle ? '' : 'disabled'}><option value="">— Choose —</option>${auth.lists.filter(d => d.circle === ff.circle).map(d => `<option ${d.division === ff.division ? 'selected' : ''}>${esc(d.division)}</option>`).join('')}</select></div></div>
-        <div id="su-taken"></div>
-        ${f('su-email', 'Email <span class="faint">(you will sign in with it)</span>', 'email', `autocomplete="email" value="${esc(ff.email || '')}"`)}
-        ${f('su-name', 'Your name', 'text', `autocomplete="name" value="${esc(ff.name || '')}"`)}
-        <div class="two">${f('su-desig', 'Designation', 'text', `value="${esc(ff.desig || '')}" placeholder="e.g. Head Clerk"`)}${f('su-phone', 'Mobile number', 'tel', `autocomplete="tel" inputmode="numeric" value="${esc(ff.phone || '')}"`)}</div>
-        <div class="two">${f('su-pw', 'Password <span class="faint">(8+ characters)</span>', 'password', 'autocomplete="new-password"')}${f('su-pw2', 'Password again', 'password', 'autocomplete="new-password"')}</div>`,
-        'signup', 'Send me a code') + `<p class="alt">Already have an account? <a href="#" data-act="auth" data-v="signin">Sign in</a></p></form>`;
-      if (ff.division) authFormChange($('#su-division'));
-      return;
-    }
-    if (v === 'verify') {
-      app.innerHTML = card('Check your email', `We sent a 6-digit code to <b>${esc(auth.email)}</b>. It may be in the spam folder.`,
-        f('code', 'Code', 'text', 'inputmode="numeric" autocomplete="one-time-code" maxlength="6"'), 'verify', 'Create my account')
-        + `<p class="alt"><a href="#" data-act="resend">Send a new code</a> · <a href="#" data-act="auth" data-v="signup">Change the details</a></p></form>`;
-    } else if (v === 'forgot') {
-      app.innerHTML = card('Forgot password', 'We will email you a code to set a new password.', f('fg-email', 'Email you signed up with', 'email', `autocomplete="email" value="${esc(auth.email)}"`), 'forgot', 'Send me a code')
-        + `<p class="alt"><a href="#" data-act="auth" data-v="signin">Back to sign in</a></p></form>`;
-    } else if (v === 'reset') {
-      app.innerHTML = card('Set a new password', `If <b>${esc(auth.email)}</b> has an account, a code is on its way. It may be in the spam folder.`,
-        f('code', 'Code', 'text', 'inputmode="numeric" autocomplete="one-time-code" maxlength="6"') +
-        `<div class="two">${f('rs-pw', 'New password <span class="faint">(8+ characters)</span>', 'password', 'autocomplete="new-password"')}${f('rs-pw2', 'New password again', 'password', 'autocomplete="new-password"')}</div>`, 'reset', 'Set the new password')
-        + `<p class="alt"><a href="#" data-act="auth" data-v="forgot">Send a new code</a> · <a href="#" data-act="auth" data-v="signin">Back to sign in</a></p></form>`;
-    } else {
-      app.innerHTML = card('Sign in', 'DL / CDL and Ban Sahayak details and duties, division by division.',
-        f('lu', 'Email', 'text', `autocomplete="username" autocapitalize="none" value="${esc(auth.email)}"`) + f('lp', 'Password', 'password', 'autocomplete="current-password"'), 'signin', 'Sign in')
-        + `<p class="alt"><a href="#" data-act="auth" data-v="forgot">Forgot password?</a></p><p class="alt">New here? <a href="#" data-act="auth" data-v="signup">Create an account</a></p></form>`;
-    }
-    setTimeout(() => { const i = $('form[data-auth] input'); i && i.focus(); }, 50);
-  }
-  function authFormChange(t) {
-    const c = $('#su-circle').value, ds = $('#su-division');
-    if (t.id === 'su-circle') {
-      ds.innerHTML = `<option value="">— Choose —</option>` + auth.lists.filter(d => d.circle === c).map(d => `<option>${esc(d.division)}</option>`).join('');
-      ds.disabled = !c; $('#su-taken').innerHTML = ''; return;
-    }
-    const d = ds.value, box = $('#su-taken'); box.innerHTML = '';
-    if (!d) return;
-    S.api.open('divisionUsers', { division: d }).then(r => {
-      if (r.count && $('#su-division') && $('#su-division').value === d)
-        box.innerHTML = `<div class="banner warn">${esc(d)} already has ${r.count} user${r.count > 1 ? 's' : ''}. Continue only if you also work for ${esc(d)}.</div>`;
-    }, () => {});
-  }
-  async function authSubmit(form, how) {
-    const v = how === 'resend' ? 'signup' : form.dataset.auth, er = $('#aerr'), go = $('#ago');
-    const val = id => ($('#' + id) || {}).value || '';
-    const busy = (on, text) => { if (go) { go.disabled = on; if (text) go.textContent = text; } };
-    if (er) er.textContent = '';
-    const label = go && go.textContent;
-    busy(true); if (go) go.innerHTML = '<span class="spin" aria-hidden="true"></span>' + esc(v === 'signin' ? 'Signing in…' : 'Please wait…');
-    try {
-      if (v === 'signin') {
-        auth.email = val('lu').trim();
-        const u = await S.api.signIn(auth.email, val('lp'));
-        signedIn(u); return;
-      }
-      if (v === 'signup') {
-        const ff = how === 'resend' ? auth.form : { circle: val('su-circle'), division: val('su-division'), email: val('su-email').trim(), name: val('su-name'), desig: val('su-desig'), phone: val('su-phone'), password: val('su-pw') };
-        if (how !== 'resend') {
-          auth.form = Object.assign({}, ff, { password: '' });
-          if (!ff.circle || !ff.division) throw new Error('Choose your circle and division.');
-          if (ff.password !== val('su-pw2')) throw new Error('The two passwords are not the same.');
-          auth.pw = ff.password;
-        }
-        await S.api.open('signupStart', Object.assign({}, ff, { password: auth.pw }));
-        auth.email = ff.email; auth.view = 'verify'; auth.msg = how === 'resend' ? 'A new code has been sent.' : ''; render(); return;
-      }
-      if (v === 'verify') {
-        const d = await S.api.open('signupVerify', { email: auth.email, code: val('code') });
-        auth.pw = ''; auth.form = null; toast('Welcome! Your account is ready.'); signedIn(d.user); return;
-      }
-      if (v === 'forgot') {
-        auth.email = val('fg-email').trim();
-        await S.api.open('forgotStart', { email: auth.email }); auth.view = 'reset'; auth.msg = ''; render(); return;
-      }
-      if (v === 'reset') {
-        if (val('rs-pw') !== val('rs-pw2')) throw new Error('The two passwords are not the same.');
-        await S.api.open('forgotVerify', { email: auth.email, code: val('code'), password: val('rs-pw') });
-        auth.view = 'signin'; auth.msg = 'Your password has been changed. Please sign in.'; render(); return;
-      }
-    } catch (x) {
-      const e2 = $('#aerr'); if (e2) e2.textContent = x.message; else toast(x.message);
-      busy(false, label);
-    }
-  }
-  function signedIn(u) {
-    S.signIn(u); auth.view = 'signin'; auth.msg = '';
-    location.hash = u.division && !u.isAdmin ? '#/d/' + enc(u.division) : '#/';
-    render();
-  }
-
-  /* ------------------------------------------------------------ admin: users */
-  let usersData = null;
-  const usersUi = { filter: 'everyone', open: '' };
-  async function loadUsers() { usersData = await S.api.call('users'); }
-  function usersPage() {
-    const by = {}; usersData.rows.forEach(u => (by[u.division] = by[u.division] || []).push(u));
-    const act = d => (by[d] || []).filter(u => u.status === 'Active').length;
-    const ds = usersData.divisions.slice().sort((a, b) => (a.circle + a.division).localeCompare(b.circle + b.division)), none = ds.filter(d => !act(d.division)), many = ds.filter(d => act(d.division) > 1);
-    const show = usersUi.filter === 'none' ? none : usersUi.filter === 'many' ? many : ds;
-    const chip = (k, t, n) => `<button class="chip ${usersUi.filter === k ? 'on' : ''}" data-act="u-filter" data-v="${k}">${t}<span class="k">${n}</span></button>`;
-    app.innerHTML = `<div class="head"><div class="grow"><h1>Users</h1><p class="muted">Division users sign up themselves with their email. Only active users are counted.</p></div></div>
-      <div class="kpis">
-        <div class="kpi"><div class="v num">${ds.length - none.length} / ${ds.length}</div><div class="l">Divisions with a user</div></div>
-        <div class="kpi"><div class="v num">${usersData.rows.filter(u => u.status === 'Active').length}</div><div class="l">Active users</div></div>
-        <div class="kpi"><div class="v num" style="color:var(--warn-ink)">${none.length}</div><div class="l">Divisions with no user</div></div>
-        <div class="kpi"><div class="v num">${many.length}</div><div class="l">Divisions with more than 1</div></div></div>
-      ${accountsCard()}
-      <div class="chips">${chip('everyone', 'Every division user', usersData.rows.length)}${chip('all', 'By division', ds.length)}${chip('none', 'No user yet', none.length)}${chip('many', 'More than 1', many.length)}</div>
-      ${usersUi.filter === 'everyone' ? everyoneCard() : `
-      <div class="card"><div style="overflow-x:auto"><table class="plain users"><thead><tr><th>Division</th><th>Users</th><th>Who</th></tr></thead><tbody>
-      ${show.map(d => {
-        const list = by[d.division] || [], n = act(d.division), open = usersUi.open === d.division;
-        return `<tr class="u-row ${n ? '' : 'none'}" data-act="u-open" data-v="${esc(d.division)}"><td><b>${esc(d.division)}</b><div class="faint">${esc(d.circle)}</div></td>
-          <td><span class="ucount ${n === 0 ? 'zero' : n > 1 ? 'many' : 'one'}">${n}</span>${n > 1 ? ' <span class="faint">more than 1</span>' : ''}</td>
-          <td>${list.length ? list.map(u => `${esc(u.name)} <span class="faint">${esc(u.desig)}${u.status !== 'Active' ? ' · disabled' : ''}</span>`).join('<br>') : '<span class="faint">No one has signed up yet</span>'}</td></tr>
-          ${open ? list.map(u => `<tr class="u-detail"><td colspan="3"><div class="row" style="justify-content:space-between;align-items:flex-start">
-            <div><b>${esc(u.name)}</b>, ${esc(u.desig)} ${u.status === 'Active' ? '<span class="pill confirmed">Active</span>' : '<span class="pill remove">Disabled</span>'}
-              <div class="faint">${esc(u.email)} · ${esc(u.phone)} · signed up ${esc(u.on)} · last sign-in ${esc(u.last || '—')}</div></div>
-            <div class="row" style="flex-wrap:nowrap">${u.status === 'Active' ? `<button class="btn sm danger" data-act="u-status" data-v="off" data-email="${esc(u.email)}">Disable</button>` : `<button class="btn sm" data-act="u-status" data-v="on" data-email="${esc(u.email)}">Enable</button>`}
-              <button class="btn sm" data-act="u-pass" data-email="${esc(u.email)}">Set a new password</button></div></div></td></tr>`).join('') : ''}`;
-      }).join('')}</tbody></table></div></div>`}`;
-  }
-  // admins and shared accounts from Config.local.gs: not tied to a division, changed only in that file
-  function accountsCard() {
-    const list = usersData.accounts || [];
-    if (!list.length) return '';
-    return `<div class="card" style="margin-bottom:16px"><h2>Admin and shared accounts</h2>
-      <p class="faint" style="margin:2px 0 10px">Kept in Config.local.gs in Apps Script, the same as UPMC and FV. To change a password, run makeHash there.</p>
-      <div style="overflow-x:auto"><table class="plain"><thead><tr><th>Username</th><th>Name</th><th>Can do</th><th>Last sign-in</th></tr></thead><tbody>
-      ${list.map(a => `<tr><td><b>${esc(a.username)}</b></td><td>${esc(a.name)}</td>
-        <td>${a.role === 'admin' ? '<span class="pill confirmed">Admin</span> <span class="faint">everything, all divisions</span>' : '<span class="pill ready">Shared operator</span> <span class="faint">edit any division</span>'}</td>
-        <td class="faint">${esc(a.last || 'Not yet')}</td></tr>`).join('')}</tbody></table></div></div>`;
-  }
-  // every division user in one list, newest first
-  function everyoneCard() {
-    const when = s => { const m = /^(\d{2})-(\d{2})-(\d{4})\s*(.*)$/.exec(s || ''); return m ? m[3] + m[2] + m[1] + m[4] : ''; };
-    const list = usersData.rows.slice().sort((a, b) => when(b.on).localeCompare(when(a.on)));
-    if (!list.length) return '<div class="card"><p class="muted" style="margin:0">No one has signed up yet.</p></div>';
-    return `<div class="card"><div style="overflow-x:auto"><table class="plain"><thead><tr><th>Name</th><th>Division</th><th>Email · Mobile</th><th>Signed up</th><th>Last sign-in</th><th></th></tr></thead><tbody>
-      ${list.map(u => `<tr><td><b>${esc(u.name)}</b><div class="faint">${esc(u.desig)}</div></td><td>${esc(u.division)}<div class="faint">${esc(u.circle)}</div></td>
-        <td>${esc(u.email)}<div class="faint">${esc(u.phone)}</div></td><td class="faint">${esc(u.on)}</td><td class="faint">${esc(u.last || '—')}</td>
-        <td><div class="row" style="flex-wrap:nowrap">${u.status === 'Active' ? `<button class="btn sm danger" data-act="u-status" data-v="off" data-email="${esc(u.email)}">Disable</button>` : `<button class="btn sm" data-act="u-status" data-v="on" data-email="${esc(u.email)}">Enable</button>`}
-          <button class="btn sm" data-act="u-pass" data-email="${esc(u.email)}">Set password</button></div></td></tr>`).join('')}</tbody></table></div></div>`;
-  }
-  async function userStatus(email, on) {
-    try { usersData = await S.api.call('userStatus', { email, active: on }); toast(on ? 'User enabled' : 'User disabled; they are signed out'); render(); }
-    catch (x) { toast(x.message); }
-  }
-  function userPassModal(email) {
-    openModal(`<h2>Set a new password</h2><p class="muted">For ${esc(email)}. Tell them the new password; they can change it later with “Forgot password”.</p>
-      <div class="field"><label for="upw">New password <span class="faint">(8+ characters)</span></label><input type="text" id="upw" autocomplete="off"></div>
-      <div class="acts"><button class="btn" data-act="mclose">Cancel</button><button class="btn primary" data-act="u-pass-ok" data-email="${esc(email)}">Set password</button></div>`);
-    setTimeout(() => $('#upw').focus(), 50);
-  }
-  async function userPassSave(email) {
-    const pw = $('#upw').value;
-    if (pw.length < 8) { toast('At least 8 characters'); return; }
-    try { await S.api.call('userPassword', { email, password: pw }); closeModal(); toast('Password set'); }
-    catch (x) { toast(x.message); }
-  }
-
+  /* ------------------------------------------------------------ who may change what (sign-in and users are in AranyaHR) */
+  // circle and state accounts of AranyaHR only view
+  const canEdit = div => !S.user || (!S.user.viewOnly && (S.user.isAdmin || !S.user.division || S.user.division === div));
   /* ------------------------------------------------------------ admin screens */
   function dashboard() {
     const ds = S.divisions(ui.cadre), tot = sum(ds), dk = S.dutyCounts(ui.cadre);
@@ -669,13 +505,13 @@
     app.innerHTML = `<div class="head"><div class="grow"><h1>Dashboard</h1><p class="muted">All divisions${S.LIVE ? '' : ' · demo'}</p></div>${legend}</div>
       ${tabs(() => true)}
       <div class="kpis">
-        <div class="kpi"><div class="v num">${tot.active}</div><div class="l">${isBS() ? 'Ban Sahayaks' : 'People working'}</div></div>
+        <div class="kpi"><div class="v num">${tot.active}</div><div class="l">${direct() ? NAMES[ui.cadre][1] : 'People working'}</div></div>
         <div class="kpi"><div class="v num" style="color:var(--good-ink)">${tot.confirmed} <span style="font-size:15px">${pct(tot.confirmed)}</span></div><div class="l">Verified</div></div>
         <div class="kpi"><div class="v num" style="color:var(--warn-ink)">${tot.missing}</div><div class="l">Missing info</div></div>
         <div class="kpi"><div class="v num" style="color:var(--bad-ink)">${tot.problem}</div><div class="l">Problems</div></div>
         <div class="kpi"><div class="v num">${S.pendingCount}</div><div class="l"><a href="#/approvals">Waiting for approval</a></div></div>
         <div class="kpi"><div class="v num">${ds.filter(d => d.certified).length} / ${ds.length}</div><div class="l">Divisions certified</div></div>
-        ${S.meta && S.meta.userCounts ? `<div class="kpi"><div class="v num">${ds.filter(d => S.meta.userCounts[d.division]).length} / ${ds.length}</div><div class="l"><a href="#/users">Divisions with a user</a></div></div>` : ''}
+        ${S.meta && S.meta.userCounts ? `<div class="kpi"><div class="v num">${ds.filter(d => S.meta.userCounts[d.division]).length} / ${ds.length}</div><div class="l"><a href="index.html#/users">Divisions with a user</a></div></div>` : ''}
         ${isBS() ? `<div class="kpi"><div class="v num">${(tot.active * S.BS_PAY / 100000).toLocaleString('en-IN', { maximumFractionDigits: 2 })} lakh</div><div class="l">Monthly pay (Rs)</div></div>` : ''}</div>
       <div class="dash">
         <div class="card"><h2 style="margin-bottom:10px">Divisions</h2><div style="overflow-x:auto"><table class="plain"><thead><tr><th>Division</th><th>People</th><th>Progress</th><th>Verified</th><th>Missing</th><th>Problem</th><th>Status</th></tr></thead><tbody>
@@ -689,11 +525,11 @@
       </div>`;
   }
   function approvals() {
-    const list = S.pending();
+    const list = S.pending().filter(p => SET.includes(p.cadre));
     app.innerHTML = `<div class="head"><div class="grow"><h1>Approvals</h1><p class="muted">Divisions' edits save straight away. Only new people and removals wait here.</p></div>
       ${list.length > 1 ? `<button class="btn good" data-act="approve-all">Approve all ${list.length}</button>` : ''}</div>
       <div class="card">${list.length ? `<div style="overflow-x:auto"><table class="plain"><thead><tr><th>Request</th><th>Person</th><th>Division</th><th>Details</th><th>By</th><th></th></tr></thead><tbody>
-        ${list.map(p => `<tr><td>${p.state === 'add-pending' ? '<span class="pill added">Add new person</span>' : '<span class="pill remove">Not working</span>'}${p.cadre === 'BS' ? ' <span class="pill bs">Ban Sahayak</span>' : ''}</td>
+        ${list.map(p => `<tr><td>${p.state === 'add-pending' ? '<span class="pill added">Add new person</span>' : '<span class="pill remove">Not working</span>'}${p.cadre !== 'CDL' ? ' <span class="pill bs">' + NAMES[p.cadre][0] + '</span>' : ''}</td>
           <td><b>${esc(p.name)}</b><div class="faint">${esc(p.range)}${p.beat ? ', ' + esc(p.beat) : ''}</div></td><td>${esc(p.division)}</td>
           <td>${p.state === 'add-pending' ? esc(p.duty || 'Duty not filled') + (p.pay != null ? ' · Rs ' + esc(p.pay) : '') : esc(p.removal.reason) + (p.removal.remark ? ' — ' + esc(p.removal.remark) : '')}</td>
           <td class="faint">${esc(p.state === 'add-pending' ? p.updBy : p.removal.by)}<br>${esc(p.state === 'add-pending' ? p.updOn : p.removal.on)}</td>
@@ -704,7 +540,7 @@
     const l = S.log.slice(0, 300);
     app.innerHTML = `<div class="head"><div class="grow"><h1>Changes</h1><p class="muted">Every edit, verification and approval, newest first. In the real app this is the Change Log sheet.</p></div></div>
       <div class="card">${l.length ? `<div style="overflow-x:auto"><table class="plain"><thead><tr><th>When</th><th>By</th><th>Division</th><th>Person</th><th>What</th><th>Old</th><th>New</th></tr></thead><tbody>
-        ${l.map(x => `<tr><td class="faint num" style="white-space:nowrap">${esc(x.on)}</td><td>${esc(x.by)}</td><td>${esc(x.division)}</td><td>${esc(x.name)}${x.cadre === 'BS' && x.name ? ' <span class="pill bs">BS</span>' : ''}</td><td><b>${esc(x.type)}</b>${x.field ? ' · ' + esc(x.field) : ''}</td>
+        ${l.map(x => `<tr><td class="faint num" style="white-space:nowrap">${esc(x.on)}</td><td>${esc(x.by)}</td><td>${esc(x.division)}</td><td>${esc(x.name)}${x.cadre && x.cadre !== 'CDL' && x.name ? ' <span class="pill bs">' + x.cadre + '</span>' : ''}</td><td><b>${esc(x.type)}</b>${x.field ? ' · ' + esc(x.field) : ''}</td>
           <td style="color:var(--bad-ink);text-decoration:${x.old ? 'line-through' : 'none'}">${esc(x.old)}</td><td style="color:var(--good-ink)">${esc(x.new)}</td></tr>`).join('')}</tbody></table></div>`
         : '<p class="muted" style="margin:0">No changes yet.</p>'}</div>`;
   }
@@ -734,7 +570,6 @@
       if (need(!!S.meta, S.loadMeta, 'Opening the divisions…', 'circles')) return;
       if (h === '/approvals' && need(S.pendingLoaded, S.loadPending, 'Collecting the requests…', 'admin')) return;
       if (h === '/log' && need(S.logLoaded, S.loadLog, 'Reading the change log…', 'admin')) return;
-      if (h === '/users' && need(!!usersData, loadUsers, 'Counting the users…', 'admin')) return;
       refresh();
     }
     if (h.startsWith('/d/')) division(h.slice(3));
@@ -742,7 +577,6 @@
     else if (S.user.role === 'admin' && h === '/divisions') picker();
     else if (S.user.role === 'admin' && h === '/approvals') approvals();
     else if (S.user.role === 'admin' && h === '/log') changeLog();
-    else if (S.user.role === 'admin' && h === '/users') usersPage();
     else if (S.user.role === 'admin') dashboard();
     else picker();
   }
@@ -757,7 +591,6 @@
     else if (old(S.metaAt)) bg('meta', S.loadMeta);
     if (force && h === '/approvals') bg('pending', S.loadPending);
     if (force && h === '/log') bg('log', S.loadLog);
-    if (force && h === '/users') bg('users', loadUsers);
   }
   window.addEventListener('hashchange', () => { closeDrawer(); window.scrollTo(0, 0); if (S.LIVE && S.user && S.meta) refresh(true); render(); });
   // live: a refused save brings the division back as the sheet has it; an expired sign-in goes back to the sign-in page
@@ -773,7 +606,6 @@
     if (!n) el.t = setTimeout(() => { el.hidden = true; }, 2500);
   });
   window.addEventListener('beforeunload', e => { if (S.saving) { e.preventDefault(); e.returnValue = ''; } });
-  document.addEventListener('submit', e => { if (e.target.dataset.auth) { e.preventDefault(); authSubmit(e.target); } });
 
   /* ------------------------------------------------------------ events */
   document.addEventListener('click', e => {
@@ -798,16 +630,9 @@
       case 'reset': S.reset(); ui.div = ''; toast('All changes reset'); render(); break;
       case 'signout': S.signOut(); location.hash = '#/'; render(); break;
       case 'retry': render(); break;
-      case 'auth': e.preventDefault(); auth.view = t.dataset.v; auth.msg = ''; render(); break;
-      case 'resend': e.preventDefault(); authSubmit(null, 'resend'); break;
-      case 'u-filter': usersUi.filter = t.dataset.v; render(); break;
-      case 'u-open': usersUi.open = usersUi.open === t.dataset.v ? '' : t.dataset.v; render(); break;
-      case 'u-status': userStatus(t.dataset.email, t.dataset.v === 'on'); break;
-      case 'u-pass': userPassModal(t.dataset.email); break;
-      case 'u-pass-ok': userPassSave(t.dataset.email); break;
       case 'as-op': S.signIn({ role: 'operator', name: 'Demo Operator' }); location.hash = '#/'; render(); break;
       case 'as-admin': S.signIn({ role: 'admin', name: 'Demo Admin' }); location.hash = '#/'; render(); break;
-      case 'cadre': if (ui.cadre !== t.dataset.v) { ui.cadre = t.dataset.v; remember('cdl-cadre', ui.cadre); Object.assign(ui, { filter: 'all', range: '', q: '', edit: null, keep: new Set() }); render(); } break;
+      case 'cadre': if (ui.cadre !== t.dataset.v) { ui.cadre = t.dataset.v; remember(CKEY, ui.cadre); Object.assign(ui, { filter: 'all', range: '', q: '', edit: null, keep: new Set() }); render(); } break;
       case 'filter': ui.filter = t.dataset.v; ui.edit = null; ui.keep.clear(); render(); break;
       case 'hide-steps': e.preventDefault(); ui.steps = false; try { localStorage.setItem('cdl-steps', 'off'); } catch (x) { /* fine */ } render(); break;
       case 'r-edit': {
@@ -847,13 +672,13 @@
         const p = S.addPerson({ cadre: d.cadre, circle: d.circle, division: d.division, name: d.name.trim(), mode: d.mode, agency: d.mode === 'Through agency' ? d.agency : '', date: d.date, district: d.district,
           range: d.range, beat: d.beat, place: d.place, placeName: d.place && d.place !== 'Beat' ? d.placeName : '', duty: d.duty, other: d.other, details: d.details, remarks: (d.remarks || '').trim(), pay: d.pay === '' || d.pay == null ? null : Number(d.pay) });
         ui.keep.add(p.id);
-        if (d.cadre !== 'BS') { toast('Added. The admin will approve it.'); render(); openPerson(p.id, [p.id]); break; }
+        if (d.cadre === 'CDL') { toast('Added. The admin will approve it.'); render(); openPerson(p.id, [p.id]); break; }
         toast(`${p.name} added`); render();
         if (t.dataset.v === 'next') openNew(); else { openPerson(p.id, [p.id]); if (S.status(p) === 'ready') askVerify(p.id); }
         break;
       }
       case 'approve': case 'reject': S.decide(id, a === 'approve'); toast(a === 'approve' ? 'Approved' : 'Rejected'); render(); break;
-      case 'approve-all': S.pending().forEach(p => S.decide(p.id, true)); toast('All approved'); render(); break;
+      case 'approve-all': S.pending().filter(p => SET.includes(p.cadre)).forEach(p => S.decide(p.id, true)); toast('All approved'); render(); break;
       default: break;
     }
   });
@@ -864,7 +689,6 @@
   document.addEventListener('change', e => {
     const t = e.target, a = t.dataset.act;
     if (a === 'track') { ui.track = t.checked; remember('cdl-track', ui.track ? 'on' : 'off'); if (!ui.track && ui.filter === 'changed') ui.filter = 'all'; render(); return; }
-    if (t.id === 'su-circle' || t.id === 'su-division') { authFormChange(t); return; }
     if (a === 'range') { ui.range = t.value; ui.edit = null; ui.keep.clear(); render(); return; }
     if (ui.edit && t.dataset.r) {   // selects change what the row shows; typed fields are read on input
       if (t.dataset.r === 'range' && t.value === '__new') { ui.edit.newRange = true; ui.edit.d.range = ''; render(); const n = $('tr.editing [data-r=range]'); n && n.focus(); return; }

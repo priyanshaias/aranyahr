@@ -2,6 +2,11 @@
 
 One web app for the staff of the Directorate of Forests, West Bengal: **FR, DR/Fr, FG/HFG, FV, DL/CDL, Ban Sahayak, Aranya Sathi and DEO**. A user signs in for their division, circle or the state and sees all the staff in it together, filtered by range. Admins get a dashboard for each cadre, user control and approvals.
 
+> **Built (29-10-2026).** See README.md for how it works and how to set it up. Three things differ from the plan below:
+> - **Website:** the old screens were not merged into one page. Each stays a page of its own (`officers.html`, `fv.html`, `cdl.html`) with its own router and styling, unchanged except for small hooks. They share the AranyaHR sign-in (`docs/js/api.js`). `index.html` has sign-in, the division home and the admin pages.
+> - **AS and DEO** use CDL+BS's code and screens (`cdl.html?set=sathi`). Their people are in the AS+DEO sheet; their Change Log and certificates are in the CDL+BS sheet, with the other two cadres.
+> - **No `map_ranges.py`:** `hrSetup()` fills the Divisions and Ranges tabs from the sheets. Merge the ranges on the Ranges page.
+
 **Rule for this build: reuse, don't rewrite.** The three live apps (UPMC2, FV, CDL+BS) work. AranyaHR moves their code into one repo with small, mechanical changes, and deletes only what becomes duplicated (three sign-ins, three `api.js`, repeated helpers). The sheet tabs and columns, and the screens people already know, stay as they are.
 
 ```
