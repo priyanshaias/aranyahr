@@ -1,15 +1,19 @@
 // Local preview: serves docs/ and answers the API with the real .gs files on the made-up sheets (tests/seed.js).
-// node tests/devserver.js [port] [--big]  →  http://localhost:8780  (admin: grv / admin-pass-1 · division: old@x.in / oldpassword)
+// node tests/devserver.js [port] [--big]  →  http://localhost:8780  (admin: as in Config.local.gs, else grv / admin-pass-1 · division: old@x.in / oldpassword)
 const http = require('http'), fs = require('fs'), path = require('path');
 const { load } = require('./mock.js'), { books: makeBooks } = require('./seed.js');
 const root = path.join(__dirname, '..'), docs = path.join(root, 'docs'), port = +process.argv[2] || 8780;
+// admins: the same as in the private apps-script/Config.local.gs, if it is on this computer
+let ADMINS = { grv: { role: 'admin', name: 'PMC admin', email: 'gouravsharmaifs@gmail.com', password: 'admin-pass-1' } };
+try { const c = {}; require('vm').runInNewContext(fs.readFileSync(path.join(root, 'apps-script', 'Config.local.gs'), 'utf8') + ';this.L = LOCAL_CONFIG', c); if (c.L.ACCOUNTS) ADMINS = c.L.ACCOUNTS; } catch (e) {}
+const ADMIN_USER = Object.keys(ADMINS)[0], ADMIN_PW = ADMINS[ADMIN_USER].password || 'admin-pass-1';
 const books = process.argv.includes('--big') ? require('./bigseed.js').books() : makeBooks();
 const T = load(path.join(root, 'apps-script'), books, { SHEET_IDS: { OFF: 'OFF', FV: 'FV', CDL: 'CDL', ASDEO: 'ASDEO', HR: 'HR' },
-  ACCOUNTS: { grv: { role: 'admin', name: 'PMC admin', email: 'gouravsharmaifs@gmail.com', password: 'admin-pass-1' } } });
+  ACCOUNTS: ADMINS });
 books.CDL.getSheetByName('Users').v.push(['old@x.in', 'Hill', 'Kurseong', 'Old User', 'RO', '9876543210', 'Active', '01-10-2026', '', 'salt1', T.run("oldHash_('salt1', 'oldpassword')")]);
 T.run('hrSetup()');
 if (process.argv.includes('--big')) {   // some approved division users
-  const adm = JSON.parse(T.ctx.doPost({ postData: { contents: JSON.stringify({ action: 'login', username: 'grv', password: 'admin-pass-1' }) } })).data.token;
+  const adm = JSON.parse(T.ctx.doPost({ postData: { contents: JSON.stringify({ action: 'login', username: ADMIN_USER, password: ADMIN_PW }) } })).data.token;
   const post = b => JSON.parse(T.ctx.doPost({ postData: { contents: JSON.stringify(b) } }));
   post({ action: 'lists' }).data.circles.forEach((c, i) => c.divisions.forEach((d, j) => { if ((i + j) % 3 === 2) return;
     const email = 'dfo' + i + '_' + j + '@x.in'; post({ action: 'signup', level: 'Division', circle: c.circle, division: d, email, name: 'Operator ' + d, desig: 'Head Clerk', phone: '9876500000', password: 'password12' });

@@ -110,4 +110,4 @@ This runs the real `.gs` files against made-up sheets and checks sign-up, approv
 ```bash
 node tests/devserver.js 8780
 ```
-This serves the website at http://localhost:8780 on the same made-up sheets. Sign in as `grv` / `admin-pass-1` (admin) or `old@x.in` / `oldpassword` (a Kurseong division user moved from CDL+BS). With `API_URL` empty, or `?demo` in the address, the cadre pages run on their own demo data instead.
+This serves the website at http://localhost:8780 on the same made-up sheets. Sign in as the admin in your private `Config.local.gs` (if it is not on the computer: `grv` / `admin-pass-1`) or `old@x.in` / `oldpassword` (a Kurseong division user moved from CDL+BS). With `API_URL` empty, or `?demo` in the address, the cadre pages run on their own demo data instead.
