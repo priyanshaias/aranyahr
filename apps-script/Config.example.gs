@@ -7,6 +7,7 @@ const LOCAL_CONFIG = {
     ASDEO: '',   // AranyaHR · AS+DEO
     HR: '',      // AranyaHR · Users
   },
+  OLD_SHEET_IDS: { FV: '', CDL: '' },   // the earlier FV and CDL+BS sheets, only read by refreshFromOld() (Refresh.gs)
   ACCOUNTS: {    // admins sign in with this username; modules: optional list ('off', 'fv', 'cdl') to limit an admin to some cadres
     // grv: { role: 'admin', name: 'PMC admin', email: 'someone@gmail.com', password: '<password>' },
   },

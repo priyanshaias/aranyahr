@@ -52,7 +52,7 @@ function services(books, mail) {
 }
 function load(dir, books, config) {
   const mail = [], ctx = vm.createContext(Object.assign(services(books, mail), { console }));
-  ['Core.gs', 'Officers.gs', 'Volunteers.gs', 'Cdlbs.gs'].forEach(f => vm.runInContext(fs.readFileSync(dir + '/' + f, 'utf8'), ctx, { filename: f }));
+  ['Core.gs', 'Officers.gs', 'Volunteers.gs', 'Cdlbs.gs', 'Refresh.gs'].filter(f => fs.existsSync(dir + '/' + f)).forEach(f => vm.runInContext(fs.readFileSync(dir + '/' + f, 'utf8'), ctx, { filename: f }));
   vm.runInContext('var LOCAL_CONFIG = ' + JSON.stringify(config), ctx);
   const post = body => JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify(body) } }));
   return { ctx, post, mail, run: s => vm.runInContext(s, ctx) };

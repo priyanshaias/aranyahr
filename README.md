@@ -92,6 +92,21 @@ Paste the changed files, run **hrSetup** once, then **Deploy → Manage deployme
 ### Admin password
 In `Config.local.gs`, set `password: '…'` in the admin's entry (or keep the `salt` and `hash` copied from UPMC2, which still work). No redeploy is needed.
 
+## Bringing in work done in the old apps (FV and Ban Sahayak)
+
+`apps-script/Refresh.gs` copies into AranyaHR what divisions entered in the old FV and CDL+BS apps since the copies were made (29-10-2026 12:41). It only reads the old sheets.
+1. In Apps Script, add `Refresh.gs`, and put `OLD_SHEET_IDS` in `Config.local.gs` (see `Config.example.gs`).
+2. Run **refreshFromOldCheck**. The log (View → Execution log) says, for FV and for Ban Sahayaks, how many people would be added, updated, removed and kept, with examples. Nothing is written.
+3. If that looks right, run **refreshFromOld**. It matches people by ID:
+   - when a person is in both sheets, the later "last updated" wins;
+   - people added in the old app come in;
+   - people the old app removed go out;
+   - people saved in AranyaHR after the copy stay.
+
+   It also adds the old Change Log and certificate rows that AranyaHR doesn't have yet, and rebuilds the cache.
+
+You can run it as often as needed (again on cut-over day). A second run changes nothing. Tested by `node tests/refresh.test.js`.
+
 ## Before going live (cut-over)
 
 The old apps still write to the old sheets, so the copies in the AranyaHR folder fall behind. On the day:
