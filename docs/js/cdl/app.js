@@ -50,12 +50,14 @@
   }
   const legend = `<div class="legend"><span><i style="background:var(--good)"></i>Verified</span><span><i style="background:#9fd4a9"></i>Ready to verify</span><span><i style="background:var(--warn)"></i>Missing info</span><span><i style="background:var(--bad)"></i>Problem</span></div>`;
 
+  // requests waiting for the admin, for this page's two cadres only
+  const setPending = () => S.LIVE ? S.dashData().reduce((a, d) => a + SET.reduce((b, c) => b + ((d[c] && (d[c].added + d[c].remove)) || 0), 0), 0) : S.pending().filter(p => SET.includes(p.cadre)).length;
   /* ------------------------------------------------------------ header */
   function header() {
     const u = S.user, h = location.hash;
     $('#nav').innerHTML = u && u.role === 'admin' ? [
       ['#/', 'Dashboard', h === '#/' || h === ''], ['#/divisions', 'Divisions', h.startsWith('#/divisions') || h.startsWith('#/d/') || h.startsWith('#/c/')],
-      ['#/approvals', 'Approvals' + (S.pendingCount ? `<span class="count">${S.pendingCount}</span>` : ''), h === '#/approvals'],
+      ['#/approvals', 'Approvals' + (setPending() ? `<span class="count">${setPending()}</span>` : ''), h === '#/approvals'],
       ['index.html#/users', 'Users', false], ['#/log', 'Changes', h === '#/log']].map(([href, t, on]) => `<a href="${href}" class="${on ? 'on' : ''}">${t}</a>`).join('') : '';
     $('#who').innerHTML = u ? `<button class="menu-btn" data-act="menu"><span class="av">${esc(u.name.split(' ').map(w => w[0]).join('').slice(0, 2))}</span><span class="hide-sm">${esc(u.name)}</span></button>` : '';
   }
@@ -497,33 +499,8 @@
   // circle and state accounts of AranyaHR only view
   const canEdit = div => !S.user || (!S.user.viewOnly && (S.user.isAdmin || !S.user.division || S.user.division === div));
   /* ------------------------------------------------------------ admin screens */
-  function dashboard() {
-    const ds = S.divisions(ui.cadre), tot = sum(ds), dk = S.dutyCounts(ui.cadre);
-    const dc = {}; S.DUTIES.forEach(d => { dc[d] = dk.duty[d] || 0; }); const blank = dk.blank;
-    const mx = Math.max(blank, ...Object.values(dc), 1);
-    const pct = n => tot.active ? Math.round(n / tot.active * 100) + '%' : '0%';
-    app.innerHTML = `<div class="head"><div class="grow"><h1>Dashboard</h1><p class="muted">All divisions${S.LIVE ? '' : ' · demo'}</p></div>${legend}</div>
-      ${tabs(() => true)}
-      <div class="kpis">
-        <div class="kpi"><div class="v num">${tot.active}</div><div class="l">${direct() ? NAMES[ui.cadre][1] : 'People working'}</div></div>
-        <div class="kpi"><div class="v num" style="color:var(--good-ink)">${tot.confirmed} <span style="font-size:15px">${pct(tot.confirmed)}</span></div><div class="l">Verified</div></div>
-        <div class="kpi"><div class="v num" style="color:var(--warn-ink)">${tot.missing}</div><div class="l">Missing info</div></div>
-        <div class="kpi"><div class="v num" style="color:var(--bad-ink)">${tot.problem}</div><div class="l">Problems</div></div>
-        <div class="kpi"><div class="v num">${S.pendingCount}</div><div class="l"><a href="#/approvals">Waiting for approval</a></div></div>
-        <div class="kpi"><div class="v num">${ds.filter(d => d.certified).length} / ${ds.length}</div><div class="l">Divisions certified</div></div>
-        ${S.meta && S.meta.userCounts ? `<div class="kpi"><div class="v num">${ds.filter(d => S.meta.userCounts[d.division]).length} / ${ds.length}</div><div class="l"><a href="index.html#/users">Divisions with a user</a></div></div>` : ''}
-        ${isBS() ? `<div class="kpi"><div class="v num">${(tot.active * S.BS_PAY / 100000).toLocaleString('en-IN', { maximumFractionDigits: 2 })} lakh</div><div class="l">Monthly pay (Rs)</div></div>` : ''}</div>
-      <div class="dash">
-        <div class="card"><h2 style="margin-bottom:10px">Divisions</h2><div style="overflow-x:auto"><table class="plain"><thead><tr><th>Division</th><th>People</th><th>Progress</th><th>Verified</th><th>Missing</th><th>Problem</th><th>Status</th></tr></thead><tbody>
-          ${ds.map(d => `<tr><td><a href="#/d/${enc(d.division)}"><b>${esc(d.division)}</b></a><div class="faint"><a href="#/c/${enc(d.circle)}">${esc(d.circle)}</a></div></td><td class="num">${d.counts.active}</td><td>${bar(d.counts)}</td>
-            <td class="num">${d.counts.confirmed}</td><td class="num">${d.counts.missing}</td><td class="num">${d.counts.problem}</td>
-            <td>${d.certified ? '<span class="pill confirmed">Certified</span>' : d.last ? '<span class="faint">Last change ' + esc(d.last.slice(0, 10)) + '</span>' : '<span class="pill missing">Not started</span>'}</td></tr>`).join('')}
-        </tbody></table></div></div>
-        <div class="card"><h2>Main duty</h2><p class="faint" style="margin:2px 0 12px">People working, by the duty they do most</p>
-          ${S.DUTIES.slice().sort((a, b) => dc[b] - dc[a]).map(d => `<div class="hbar"><span>${esc(short(d))}</span><span class="t"><i style="width:${dc[d] / mx * 100}%"></i></span><span class="n">${dc[d]}</span></div>`).join('')}
-          <div class="hbar blank"><span><b>Not filled yet</b></span><span class="t"><i style="width:${blank / mx * 100}%"></i></span><span class="n">${blank}</span></div></div>
-      </div>`;
-  }
+  // the admin dashboard lives in dash.js
+  function dashboard() { window.CDL_DASH.render(app); }
   function approvals() {
     const list = S.pending().filter(p => SET.includes(p.cadre));
     app.innerHTML = `<div class="head"><div class="grow"><h1>Approvals</h1><p class="muted">Divisions' edits save straight away. Only new people and removals wait here.</p></div>
