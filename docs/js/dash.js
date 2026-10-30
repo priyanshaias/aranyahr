@@ -117,17 +117,11 @@
   }
   function scopeRows() { return S.data.rows.filter(r => (!S.circle || r.circle === S.circle) && (!S.division || r.division === S.division)); }
 
-  const modes = () => `<div class="hd-modes" role="tablist">
-      <button role="tab" data-by="division" class="${S.by === 'division' ? 'on' : ''}"><b>By division</b><span>State, circle and division: progress and people</span></button>
-      <button role="tab" data-by="cadre" class="${S.by === 'cadre' ? 'on' : ''}"><b>By cadre</b><span>Each cadre’s own dashboard: FR / DR / FG, DL / CDL and BS, Aranya Sathi and DEO, FV</span></button></div>`;
-  function wireModes() { app.querySelectorAll('[data-by]').forEach(b => b.onclick = () => set({ by: b.dataset.by })); }
-
   /** By cadre: one card per earlier app, with its numbers across the state, opening that app's own dashboard. */
   function drawHub() {
     const rows = S.data.rows, admin = API.user.isAdmin;
-    app.innerHTML = `<div class="dash hd"><div class="head"><div><h1 class="page-title">Dashboards.</h1>
+    app.innerHTML = `<div class="dash hd"><div class="head"><div><h1 class="page-title">All cadres at a glance.</h1>
         <p class="page-sub">${n(ofRows(rows, KS).total)} people in all cadres · data as of ${esc(S.data.builtAt || 'now')}</p></div></div>
-      ${modes()}
       <div class="hd-hub">${HUB.map(h => {
         const x = ofRows(rows, h.ks), started = rows.filter(r => { const y = ofRow(r, h.ks); return y.total && !notStarted(y); }).length, listed = rows.filter(r => ofRow(r, h.ks).total).length;
         return `<section class="hd-hubcard">
@@ -140,7 +134,6 @@
             <span class="faint">${started} of ${listed} divisions started</span></div>
         </section>`; }).join('')}</div>
       ${legend(STAGES.map(st => [st[2], st[1]]))}</div>`;
-    wireModes();
   }
 
   async function draw() {
@@ -156,7 +149,6 @@
       <div class="head"><div><h1 class="page-title">${esc(where)}.</h1>
         <p class="page-sub">${n(tot.total)} ${S.cadre ? esc(label(S.cadre)) : 'people in all cadres'}${S.division ? '' : ` · ${inScope.length} division${inScope.length === 1 ? '' : 's'}`} · ${pct(tot.done, tot.total)}% verified · data as of ${esc(S.data.builtAt || 'now')}</p></div>
         <span class="sp"></span><div class="dash-actions"><button class="btn sm" id="hdRefresh">↻ Refresh</button><button class="btn sm" id="hdCsv">↓ CSV</button></div></div>
-      ${modes()}
       <div class="hd-filters">
         <div class="hd-scope"><span class="faint">View</span>
           <button class="hd-crumb ${!S.circle ? 'on' : ''}" data-scope="state" ${circleFixed ? 'disabled' : ''}>State</button><span class="sep">›</span>
@@ -167,7 +159,6 @@
           ${KS.map(k => { const x = ofRows(inScope, [k]); return `<button class="chip ${S.cadre === k ? 'on' : ''}" data-cadre="${k}" title="${esc(label(k))}"><i class="hd-dot" style="background:${COL[k]}"></i>${k}<span class="n">${n(x.total)}</span></button>`; }).join('')}</div>
       </div>
       <div id="hdBody"></div></div>`;
-    wireModes();
     $('#hdRefresh').onclick = () => render(app, true);
     $('#hdCsv').onclick = csv;
     app.querySelectorAll('[data-scope]').forEach(b => b.onclick = () => set({ circle: '', division: '' }));

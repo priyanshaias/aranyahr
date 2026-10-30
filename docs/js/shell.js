@@ -41,26 +41,8 @@
     <span>Need help? Contact <b>${esc(HELP.name)}</b>, ${esc(HELP.office)} · <a href="tel:${HELP.tel}">${esc(HELP.phone)}</a></span></div>`;
 
   /* ---------------- header ---------------- */
-  function renderWho() {
-    const u = API.user;
-    $('#demoFlag').classList.toggle('hidden', !API.DEMO);
-    if (!u) { $('#who').innerHTML = ''; return; }
-    const where = u.isAdmin ? 'Admin' : u.level === 'Division' ? u.division : u.level === 'Circle' ? u.circle + ' circle (view only)' : 'State (view only)';
-    const links = [['#/', 'Home'], (u.isAdmin || u.level !== 'Division') && ['#/dash', 'Dashboard'],
-      u.isAdmin && ['#/approvals', 'Approvals'], u.isAdmin && ['#/users', 'Users'], u.isAdmin && ['#/ranges', 'Ranges'], u.isAdmin && ['#/settings', 'Settings']].filter(Boolean);
-    $('#who').innerHTML = `${links.slice(1, 4).map(([h, t]) => `<a class="btn sm ghost hide-sm" href="${h}">${t}</a>`).join('')}
-      <button class="menu-btn" id="menuBtn" aria-haspopup="true" aria-expanded="false">
-        <span class="av">${esc(String(u.name || '?').split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase())}</span><span class="hide-sm">${esc(u.name)}</span><span aria-hidden="true">▾</span></button>
-      <div class="menu hidden" id="menu" role="menu">
-        <div class="menu-who"><b>${esc(u.name)}</b><span>${esc(where)} · ${esc(u.email || u.username)}</span></div>
-        ${links.map(([h, t]) => `<a role="menuitem" href="${h}">${t}</a>`).join('')}
-        <button role="menuitem" id="outBtn">Sign out</button></div>`;
-    const menu = $('#menu'), mb = $('#menuBtn');
-    mb.onclick = e => { e.stopPropagation(); mb.setAttribute('aria-expanded', menu.classList.toggle('hidden') === false); };
-    menu.querySelectorAll('a').forEach(a => a.onclick = () => menu.classList.add('hidden'));
-    $('#outBtn').onclick = () => { API.signOut(); go('#/'); route(); };
-  }
-  document.addEventListener('click', e => { const m = $('#menu'); if (m && !e.target.closest('#menu')) m.classList.add('hidden'); });
+  // the header (header.js) shows who is signed in, the menus and Sign out
+  const renderWho = () => window.HR_HEADER && window.HR_HEADER.render();
 
   /* ---------------- sign in, sign up, forgot password ---------------- */
   const A = { email: '', msg: '', lists: null, form: {}, pw: '' };

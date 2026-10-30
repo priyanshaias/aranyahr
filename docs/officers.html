@@ -10,12 +10,12 @@
 <title>FR, DR/Fr, FG · AranyaHR</title>
 <meta name="description" content="Directorate of Forests, West Bengal · verify officer posting and service details">
 <link rel="stylesheet" href="css/app.css?v=20261030a">
-<link rel="stylesheet" href="css/hr.css?v=20261030a">
+<link rel="stylesheet" href="css/hr.css?v=20261030e">
 </head>
 <body>
-<header class="topbar"><div class="in">
-  <a href="index.html" class="mark" aria-label="AranyaHR home"><img src="assets/emblem.svg" alt=""></a>
-  <div class="brand"><a class="hr-back" href="index.html">AranyaHR</a> · FR, DR/Fr, FG<small>Directorate of Forests · West Bengal</small></div>
+<header id="hrTop" class="hr-top"></header>
+<header class="topbar hr-sub"><div class="in">
+  <div class="brand">FR, DR/Fr, FG/HFG<small>Officers: posting, home district and service details</small></div>
   <span id="demoFlag" class="demo-flag hidden">Demo data</span>
   <span class="sp"></span>
   <button class="help-btn" data-help aria-label="Help">? <span class="hide-sm">Help</span></button>
@@ -33,10 +33,12 @@
 <script src="js/config.js?v=20261030a" defer></script>
 <script src="js/officers/demo.js?v=20261030a" defer></script>
 <script src="js/api.js?v=20261030a" data-module="off" defer></script>
+<script src="js/header.js?v=20261030e" defer></script>
 <script src="js/officers/fields.js?v=20261030a" defer></script>
 <script src="js/officers/pdf.js?v=20261030a" defer></script>
-<script src="js/officers/app.js?v=20261030a" defer></script>
-<script src="js/officers/dashboard.js?v=20261030a" defer></script>
-<script src="js/officers/report.js?v=20261030a" defer></script>
+<!-- dashboard and report before app.js: app.js may open #/dash or #/report at once, from the counts saved on the device -->
+<script src="js/officers/dashboard.js?v=20261030e" defer></script>
+<script src="js/officers/report.js?v=20261030e" defer></script>
+<script src="js/officers/app.js?v=20261030e" defer></script>
 </body>
 </html>

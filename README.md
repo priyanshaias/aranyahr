@@ -36,6 +36,18 @@ GitHub Pages (docs/)                 ──►  "AranyaHR API" (one Apps Script 
 - **Email verification is optional.** Settings → "Email code at sign-up" (off by default) asks for a 6-digit code before the account is made. On the Users page, **Send email** mails anyone a link that marks their address as verified. "Forgot password" always sends a code.
 - The server enforces all of this. A division user's request is always for their own division, whatever the website sends.
 
+## Header
+
+Every page has the same AranyaHR header:
+- **Home**.
+- **Dashboard ▾**:
+  - **Division wise**: state, circle and division;
+  - **Cadre wise ›** FR · DR/Fr · FG/HFG, DL / CDL and Ban Sahayak, Forest Volunteers, Aranya Sathi and DEO, or all cadres at a glance.
+- **Approvals** and **Users** (admins).
+- The user menu, with Ranges, Settings and Sign out.
+
+Division users get **Lists ▾** with their own division's four cadre pages instead of Dashboard. On a cadre's page, that cadre's own bar sits just below as a sub-header, with its name and its own links (dashboard, reports, approvals, change log, help). On phones the header folds into a ☰ menu.
+
 ## Dashboard (`#/dash`)
 
 For admins, and read-only for circle and state accounts (a circle account sees its own circle).
