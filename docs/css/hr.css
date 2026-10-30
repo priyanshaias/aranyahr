@@ -175,3 +175,29 @@
   .hd .dash-actions { width: 100%; } .hd .dash-actions .btn { flex: 1; }
   .hd-view { margin-left: 0; }
 }
+
+/* dashboard: By division / By cadre */
+.hd-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0 0 16px; }
+.hd-modes button { text-align: left; font: inherit; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-14); padding: 12px 16px; cursor: pointer; display: grid; gap: 2px; transition: border-color .15s, box-shadow .15s; }
+.hd-modes button:hover { border-color: var(--border-hover); }
+.hd-modes button.on { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
+.hd-modes b { color: var(--ink); font-size: 15.5px; } .hd-modes span { color: var(--text-subtle); font-size: 12.5px; }
+@media (max-width: 560px) { .hd-modes { grid-template-columns: 1fr; } }
+.hd-hub { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
+@media (max-width: 900px) { .hd-hub { grid-template-columns: 1fr; } }
+.hd-hubcard { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-16); padding: 18px 20px; display: grid; gap: 12px; align-content: start; }
+.hd-hubh { display: flex; gap: 14px; align-items: center; }
+.hd-hubh h3 { font-size: 18px; font-weight: 900; letter-spacing: -0.02em; } .hd-hubh p { margin: 2px 0 0; font-size: 13px; color: var(--text-subtle); }
+.hd-hubn { display: flex; gap: 6px 18px; flex-wrap: wrap; font-size: 13px; color: var(--text-subtle); } .hd-hubn b { color: var(--ink); font-size: 16px; }
+.hd-hubf { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 2px; } .hd-hubf .faint { margin-left: auto; }
+.hd-hubcard .hd-cbar div { height: auto; } .hd-hubcard .hd-cbar .hd-bar { height: 9px; }
+.hd-dacts { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* staff-list download */
+.hr-dl { max-width: 560px; }
+.hr-dl .dbody { padding: 18px 26px 22px; display: grid; gap: 10px; }
+.hr-dlopt { text-align: left; font: inherit; border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius-12); padding: 14px 16px; cursor: pointer; display: grid; gap: 3px; transition: border-color .15s, background .15s; }
+.hr-dlopt:hover:not(:disabled) { border-color: var(--primary); background: var(--primary-soft); }
+.hr-dlopt:disabled { opacity: .5; cursor: default; }
+.hr-dlopt b { color: var(--ink); font-size: 15px; } .hr-dlopt span { color: var(--text-subtle); font-size: 13px; }
+.hr-dlbar .ibar { margin: 4px 0 6px; }

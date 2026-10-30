@@ -20,7 +20,17 @@
   const HEAT = ['#eef8f0', '#dff3e2', '#b5e2bf', '#8fd19e', '#5bb672', '#2f9e44', '#1d6b31'];
   const heat = p => HEAT[Math.min(HEAT.length - 1, Math.floor(p / 100 * (HEAT.length - 1) + 0.0001))];
 
-  const S = { data: null, home: {}, circle: '', division: '', cadre: '', view: 'progress', sort: 'low', tsort: { k: 'pct', dir: 1 } };
+  const S = { data: null, home: {}, by: 'division', circle: '', division: '', cadre: '', view: 'progress', sort: 'low', tsort: { k: 'pct', dir: 1 } };
+  // "By cadre": each cadre's own dashboard in the earlier apps (admins); others get those apps' lists
+  const HUB = [
+    { title: 'FR, DR/Fr, FG/HFG', sub: 'Officers: posting, home district and service details', ks: ['FR', 'DFR', 'FG'], dash: 'officers.html#/dash', list: 'officers.html#/circles',
+      links: [['Follow-up reports', 'officers.html#/report'], ['Approvals', 'officers.html#/admin']] },
+    { title: 'DL / CDL and Ban Sahayak', sub: 'Details, duties and pay, checked and certified by each division', ks: ['CDL', 'BS'], dash: 'cdl.html#/', list: 'cdl.html#/',
+      links: [['Divisions', 'cdl.html#/divisions'], ['Approvals', 'cdl.html#/approvals'], ['Change log', 'cdl.html#/log']] },
+    { title: 'Aranya Sathi and DEO', sub: 'The same screens as DL / CDL, for Aranya Sathis and DEOs', ks: ['AS', 'DEO'], dash: 'cdl.html?set=sathi#/', list: 'cdl.html?set=sathi#/',
+      links: [['Divisions', 'cdl.html?set=sathi#/divisions'], ['Approvals', 'cdl.html?set=sathi#/approvals'], ['Change log', 'cdl.html?set=sathi#/log']] },
+    { title: 'Forest Volunteers', sub: 'The list of volunteers each division has engaged', ks: ['FV'], dash: 'fv.html#/admin', list: 'fv.html#/circles', links: [] },
+  ];
   const label = k => SH().CAD[k].label;
 
   /* ---------------- numbers ---------------- */
@@ -82,13 +92,14 @@
   /* ---------------- url and data ---------------- */
   function readUrl() {
     const q = new URLSearchParams(location.hash.split('?')[1] || ''), u = API.user;
+    S.by = q.get('by') === 'cadre' ? 'cadre' : 'division';
     S.circle = q.get('circle') || ''; S.division = q.get('division') || ''; S.cadre = KS.includes(q.get('cadre')) ? q.get('cadre') : '';
     S.view = q.get('view') === 'workforce' ? 'workforce' : 'progress'; S.sort = ['low', 'size', 'az'].includes(q.get('sort')) ? q.get('sort') : 'low';
     if (!u.isAdmin && u.level === 'Circle') S.circle = u.circle;
   }
   function saveUrl() {
     const p = new URLSearchParams();
-    [['circle', S.circle], ['division', S.division], ['cadre', S.cadre], ['view', S.view === 'progress' ? '' : S.view], ['sort', S.sort === 'low' ? '' : S.sort]].forEach(([k, v]) => { if (v) p.set(k, v); });
+    [['by', S.by === 'cadre' ? 'cadre' : ''], ['circle', S.circle], ['division', S.division], ['cadre', S.cadre], ['view', S.view === 'progress' ? '' : S.view], ['sort', S.sort === 'low' ? '' : S.sort]].forEach(([k, v]) => { if (v) p.set(k, v); });
     history.replaceState(null, '', '#/dash' + (p.toString() ? '?' + p : ''));
   }
   const set = patch => { Object.assign(S, patch); saveUrl(); draw(); };
@@ -106,7 +117,34 @@
   }
   function scopeRows() { return S.data.rows.filter(r => (!S.circle || r.circle === S.circle) && (!S.division || r.division === S.division)); }
 
+  const modes = () => `<div class="hd-modes" role="tablist">
+      <button role="tab" data-by="division" class="${S.by === 'division' ? 'on' : ''}"><b>By division</b><span>State, circle and division: progress and people</span></button>
+      <button role="tab" data-by="cadre" class="${S.by === 'cadre' ? 'on' : ''}"><b>By cadre</b><span>Each cadre’s own dashboard: FR / DR / FG, DL / CDL and BS, Aranya Sathi and DEO, FV</span></button></div>`;
+  function wireModes() { app.querySelectorAll('[data-by]').forEach(b => b.onclick = () => set({ by: b.dataset.by })); }
+
+  /** By cadre: one card per earlier app, with its numbers across the state, opening that app's own dashboard. */
+  function drawHub() {
+    const rows = S.data.rows, admin = API.user.isAdmin;
+    app.innerHTML = `<div class="dash hd"><div class="head"><div><h1 class="page-title">Dashboards.</h1>
+        <p class="page-sub">${n(ofRows(rows, KS).total)} people in all cadres · data as of ${esc(S.data.builtAt || 'now')}</p></div></div>
+      ${modes()}
+      <div class="hd-hub">${HUB.map(h => {
+        const x = ofRows(rows, h.ks), started = rows.filter(r => { const y = ofRow(r, h.ks); return y.total && !notStarted(y); }).length, listed = rows.filter(r => ofRow(r, h.ks).total).length;
+        return `<section class="hd-hubcard">
+          <div class="hd-hubh">${ring(pct(x.done, x.total))}<div><h3>${esc(h.title)}</h3><p>${esc(h.sub)}</p></div></div>
+          <div class="hd-hubn"><span><b>${n(x.total)}</b> people</span><span><b>${pct(x.done, x.total)}%</b> ${h.ks[0] === 'FV' ? 'complete' : 'verified'}</span><span><b>${listed}</b> divisions listed</span>${x.appr ? `<span><b class="hd-viol">${n(x.appr)}</b> awaiting the admin</span>` : ''}</div>
+          ${progBar(x, h.title)}
+          ${h.ks.length > 1 ? `<div class="hd-cbars">${h.ks.map(k => { const y = ofRows(rows, [k]); return `<div class="hd-cbar"><span>${k}</span><div>${progBar(y, label(k))}</div><b>${n(y.total)}</b></div>`; }).join('')}</div>` : ''}
+          <div class="hd-hubf"><a class="btn primary" href="${admin ? h.dash : h.list}">${admin ? 'Open the dashboard' : 'Open the lists'} ›</a>
+            ${admin ? h.links.map(([t, href]) => `<a class="btn sm ghost" href="${href}">${t}</a>`).join('') : ''}
+            <span class="faint">${started} of ${listed} divisions started</span></div>
+        </section>`; }).join('')}</div>
+      ${legend(STAGES.map(st => [st[2], st[1]]))}</div>`;
+    wireModes();
+  }
+
   async function draw() {
+    if (S.by === 'cadre') { drawHub(); return; }
     const u = API.user, rows = S.data.rows, circles = [...new Set(rows.map(r => r.circle))];
     if (S.circle && !circles.includes(S.circle)) S.circle = '';
     if (S.division && !rows.some(r => r.division === S.division && (!S.circle || r.circle === S.circle))) S.division = '';
@@ -118,6 +156,7 @@
       <div class="head"><div><h1 class="page-title">${esc(where)}.</h1>
         <p class="page-sub">${n(tot.total)} ${S.cadre ? esc(label(S.cadre)) : 'people in all cadres'}${S.division ? '' : ` · ${inScope.length} division${inScope.length === 1 ? '' : 's'}`} · ${pct(tot.done, tot.total)}% verified · data as of ${esc(S.data.builtAt || 'now')}</p></div>
         <span class="sp"></span><div class="dash-actions"><button class="btn sm" id="hdRefresh">↻ Refresh</button><button class="btn sm" id="hdCsv">↓ CSV</button></div></div>
+      ${modes()}
       <div class="hd-filters">
         <div class="hd-scope"><span class="faint">View</span>
           <button class="hd-crumb ${!S.circle ? 'on' : ''}" data-scope="state" ${circleFixed ? 'disabled' : ''}>State</button><span class="sep">›</span>
@@ -128,6 +167,7 @@
           ${KS.map(k => { const x = ofRows(inScope, [k]); return `<button class="chip ${S.cadre === k ? 'on' : ''}" data-cadre="${k}" title="${esc(label(k))}"><i class="hd-dot" style="background:${COL[k]}"></i>${k}<span class="n">${n(x.total)}</span></button>`; }).join('')}</div>
       </div>
       <div id="hdBody"></div></div>`;
+    wireModes();
     $('#hdRefresh').onclick = () => render(app, true);
     $('#hdCsv').onclick = csv;
     app.querySelectorAll('[data-scope]').forEach(b => b.onclick = () => set({ circle: '', division: '' }));
@@ -141,6 +181,7 @@
       const h = await loadHome(S.division);
       if (S.division !== h.division) return;
       body.innerHTML = S.view === 'workforce' ? divisionWorkforce(h, inScope[0]) : divisionProgress(h, inScope[0]);
+      $('#hdDl').onclick = () => window.HR_DOWNLOAD.open(h);
     } else body.innerHTML = S.view === 'workforce' ? workforce(inScope) : progress(inScope);
     wire(body);
   }
@@ -294,7 +335,7 @@
     return `<div class="hd-divhead"><div class="hd-dbig">${ring(pct(x.done, x.total))}<div><b>${n(x.done)} of ${n(x.total)} verified</b><small>${S.cadre ? esc(label(S.cadre)) : 'all cadres'} · last save ${esc(ago(x.last))}</small></div></div>
       <div class="hd-dfacts"><span><b>${h.ranges.length}</b> ranges</span><span><b class="hd-viol">${x.appr}</b> awaiting the admin</span><span><b class="${r.users ? '' : 'hd-warn'}">${r.users}</b> AranyaHR user${r.users === 1 ? '' : 's'}</span>
         <span class="hd-st"><i style="background:${DIVST.find(d => d[0] === stl)[2]}"></i>${DIVST.find(d => d[0] === stl)[1]}</span></div>
-      <a class="btn soft" href="#/d/${enc(h.division)}">Open the division’s people ›</a></div>`;
+      <div class="hd-dacts"><button class="btn primary" id="hdDl">↓ Download staff list</button><a class="btn soft" href="#/d/${enc(h.division)}">Open the division’s people ›</a></div></div>`;
   }
   function divisionProgress(h, r) {
     const ranges = byRange(h);

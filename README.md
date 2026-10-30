@@ -40,6 +40,20 @@ GitHub Pages (docs/)                 ──►  "AranyaHR API" (one Apps Script 
 
 For admins, and read-only for circle and state accounts (a circle account sees its own circle).
 
+Two choices at the top:
+- **By division:** described below.
+- **By cadre:** one card per cadre group, with its numbers across the state, opening that group's own dashboard:
+  - FR / DR / FG (UPMC2's dashboard, reports and approvals);
+  - DL / CDL and BS;
+  - Aranya Sathi and DEO (the same screens as DL / CDL);
+  - FV.
+
+**Download staff list** (on a division's home page and on its dashboard view):
+- FR / DR / FG as UPMC2's information sheets, one PDF;
+- every cadre as one Excel workbook, with a sheet each for officers, FV, DL - CDL, Ban Sahayak, Aranya Sathi and DEO.
+
+Both files are made in the browser; the PDF and Excel tools load only when needed.
+
 - **Three levels:** State → circle → division. Use the selectors at the top, or click any circle or division in a chart or table.
 - **Two lenses:**
   - **Progress:** how much of each list is filled and verified, and who to follow up with. It has:

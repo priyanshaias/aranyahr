@@ -195,7 +195,8 @@
     const n = r => all.filter(p => p.range === r).length;
     const by = CADRES.map(c => { const ps = here.filter(p => p.cadre === c.k); return { c, total: ps.length, done: ps.filter(p => isDone(p.status)).length }; });
     app.innerHTML = `${u.level === 'Division' && !u.isAdmin ? '' : `<div class="crumbs"><a href="#/">All divisions</a><span class="sep">/</span><span>${esc(D.circle)}</span><span class="sep">/</span><span>${esc(D.division)}</span></div>`}
-      <div class="head"><div><h1 class="page-title">${esc(D.division)}</h1><p class="page-sub">${esc(D.circle)} circle · ${all.length} people in all cadres${u.isAdmin || u.level === 'Division' ? '' : ' · view only'}</p></div></div>
+      <div class="head"><div><h1 class="page-title">${esc(D.division)}</h1><p class="page-sub">${esc(D.circle)} circle · ${all.length} people in all cadres${u.isAdmin || u.level === 'Division' ? '' : ' · view only'}</p></div>
+        <span class="sp"></span><button class="btn soft" id="dlBtn">↓ Download staff list</button></div>
       <div class="hr-ranges"><span class="faint">Range</span><div class="chips">
         <button class="chip ${H.range === 'all' ? 'on' : ''}" data-range="all">All<span class="n">${all.length}</span></button>
         ${ranges.map(r => `<button class="chip ${H.range === r ? 'on' : ''}" data-range="${esc(r)}">${esc(r)}<span class="n">${n(r)}</span></button>`).join('')}</div></div>
@@ -210,6 +211,7 @@
           <td>${esc(p.cadre)}</td><td>${esc(p.range)}${p.range === 'Range not matched' || (p.rawRange && p.rawRange !== p.range && p.range !== 'Div HQ') ? `<div class="faint">${esc(p.rawRange)}</div>` : ''}</td>
           <td>${esc(p.place)}</td><td><span class="pill ${st[1]}">${esc(st[0])}</span></td></tr>`; }).join('') : '<tr><td colspan="5" class="faint" style="padding:22px">No one here with this filter.</td></tr>'}
       </tbody></table></div></div>`;
+    $('#dlBtn').onclick = () => window.HR_DOWNLOAD.open(D);
     app.querySelectorAll('[data-range]').forEach(b => b.onclick = () => { H.range = b.dataset.range; drawHome(); });
     app.querySelectorAll('[data-cadre]').forEach(b => b.onclick = () => { H.cadre = b.dataset.cadre; drawHome(); });
     $('#q').oninput = e => { H.q = e.target.value; const at = e.target.selectionStart; drawHome(); const i = $('#q'); i.focus(); i.setSelectionRange(at, at); };
