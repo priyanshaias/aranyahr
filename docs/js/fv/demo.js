@@ -16,7 +16,7 @@
   const LABEL = { name: 'Name of Forest Volunteer Engaged', dob: 'Date of Birth', qual: 'Educational Qualification', deptRef: "Forest Dept.'s approval ref",
     dirRef: "Forest Directorate's Ref no sent to the Circle in Charge", apptRef: 'Appointment Order issued by / reference', doj: 'Date of Joining',
     placeType: 'Posted at (Div HQ / Range)', placeName: 'Range name', placeSub: 'Within the range (Range HQ / Beat / Camp)', works: 'Nature of Works assigned' };
-  const KEY = 'fv_demo_db_v2';
+  const KEY = 'fv_demo_db_v3';
   const pad = n => String(n).padStart(2, '0');
   const now = () => { const d = new Date(); return `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
   const uid = () => 'FV-' + Math.random().toString(16).slice(2, 10).toUpperCase();
@@ -37,9 +37,43 @@
         ['Pemba Sherpa', '09-05-1999', 'Graduate', ['Ghoom', 'Camp: Tonglu'], '', 'Forest Protection and Patrolling: anti-poaching camp'],
         ['Anita Rai', '30-01-2001', 'Higher Secondary (Class XII)', ['Ghoom', 'Beat: Ghoom'], '', 'Forest Protection and Patrolling: fire watch'],
       ], 'Demo operator (UDC, Darjeeling Dn.)', '28-10-2026 10:05:11'));
-    const log = rows.map(r => ({ on: r.updOn, username: 'user', by: r.updBy.split(' (')[0], desig: (r.updBy.split(' (')[1] || '').replace(')', ''), mobile: '',
-      circle: r.circle, division: r.division, vid: r.id, vname: r.name, action: 'Added', field: LABEL.name, old: '', value: r.name })).reverse();
-    const ver = { 'Central|Bankura (N)': { n: 1, on: '27-10-2026 16:12:40', by: rows[0].updBy }, 'Hill|Darjeeling': { n: 1, on: '28-10-2026 10:05:11', by: rows[3].updBy } };
+    // more made-up volunteers across most divisions, so the dashboard has something to show
+    let sd = 7; const rnd = () => (sd = sd * 16807 % 2147483647) / 2147483647, pick = a => a[Math.floor(rnd() * a.length)];
+    const FIRST = ['Ratan', 'Sumana', 'Bapi', 'Pemba', 'Anita', 'Sanjay', 'Mithu', 'Rakesh', 'Puja', 'Tapas', 'Bishnu', 'Laxmi', 'Dipankar', 'Sonali', 'Amit', 'Rinku', 'Gopal',
+      'Shibu', 'Sabita', 'Manoj', 'Karma', 'Dawa', 'Rupa', 'Biswajit', 'Chandan', 'Mousumi', 'Haru', 'Suraj', 'Phulmani', 'Jitu'];
+    const LAST = ['Mandi', 'Kisku', 'Hansda', 'Murmu', 'Tudu', 'Soren', 'Mahato', 'Barman', 'Roy', 'Das', 'Mondal', 'Ghosh', 'Sherpa', 'Tamang', 'Rai', 'Oraon', 'Munda', 'Sarkar', 'Pradhan', 'Lepcha'];
+    const QL = ['Class VIII', 'Madhyamik (Class X)', 'Madhyamik (Class X)', 'Higher Secondary (Class XII)', 'Higher Secondary (Class XII)', 'Graduate', 'Graduate', 'ITI / Diploma', 'Post Graduate', 'Below Class VIII'];
+    const WK = ['Forest Protection and Patrolling', 'Forest Protection and Patrolling: night patrolling', 'Human-Animal Conflict Management', 'Human-Animal Conflict Management: elephant drive (hulla party)',
+      'Nursery Operations', 'Nursery Operations: seedling raising', 'Timber Depot', 'Driver', 'Mali/Gardener', 'Night Guard/Security', 'Cleaning/Sweeping/Maintenance',
+      'Others: Mahut of elephant Champa', 'Others: Data entry in range office', 'Others: Boatman for river patrolling'];
+    const BEATS = ['Dhalpara', 'Mohanpur', 'Kalikapur', 'Bhalukjhora', 'Patharghata', 'Sitarampur', 'Chandipur', 'Nischintapur', 'Lataguri', 'Rampur'];
+    const OPS = [['Subhas Pal', 'Head Clerk'], ['Nirmal Saha', 'UDC'], ['Tanmoy Dey', 'Range Officer'], ['Asit Bera', 'Head Clerk'], ['Kakali Sen', 'LDC']];
+    const dt = (y0, y1) => `${pad(1 + Math.floor(rnd() * 28))}-${pad(1 + Math.floor(rnd() * 12))}-${y0 + Math.floor(rnd() * (y1 - y0 + 1))}`;
+    const extra = {};
+    CIRCLES.forEach(C => C.divisions.forEach(d => {
+      if (d === 'Circle HQ' || rnd() < 0.28 || (C.circle === 'Central' && d === 'Bankura (N)') || (C.circle === 'Hill' && d === 'Darjeeling')) return;
+      const ago = Math.floor(rnd() * rnd() * 26), t = new Date(Date.now() - ago * 864e5), [opn, opd] = pick(OPS);
+      const on = `${pad(t.getDate())}-${pad(t.getMonth() + 1)}-${t.getFullYear()} ${pad(ago ? 10 + Math.floor(rnd() * 7) : Math.max(0, t.getHours() - 1))}:${pad(Math.floor(rnd() * 60))}:00`;
+      const by = `${opn} (${opd}, ${d} Dn.)`, k = 2 + Math.floor(rnd() * 10), short = d.replace(/[^A-Za-z].*$/, '');
+      for (let i = 0; i < k; i++) {
+        const div = rnd() < 0.15, sub = rnd(), r = { id: uid(), circle: C.circle, division: d, sl: i + 1, name: pick(FIRST) + ' ' + pick(LAST), dob: dt(1972, 2003), qual: pick(QL),
+          deptRef: 'No. ' + (900 + Math.floor(rnd() * 400)) + '/FD/2025', dirRef: 'No. ' + (300 + Math.floor(rnd() * 300)) + '/PCCF(HoFF)/2025', apptRef: 'DFO, ' + d + ' · Memo ' + (100 + i) + '/' + short.slice(0, 3).toUpperCase(),
+          doj: rnd() < 0.5 ? dt(2025, 2025) : dt(2024, 2024).replace(/-\d{2}-/, '-' + pad(7 + Math.floor(rnd() * 6)) + '-'), placeType: div ? 'Div HQ' : 'Range',
+          placeName: div ? '' : short + ' ' + pick(['North', 'South', 'East', 'West', 'Sadar']), placeSub: div ? '' : sub < 0.25 ? 'Range HQ' : sub < 0.75 ? 'Beat: ' + pick(BEATS) : 'Camp: ' + pick(BEATS) + ' camp',
+          works: pick(WK), updOn: on, updBy: by };
+        const gap = rnd();
+        if (gap < 0.1) r.dirRef = ''; else if (gap < 0.17) r.apptRef = ''; else if (gap < 0.22) r.dob = ''; else if (gap < 0.26 && !div) r.placeSub = 'Beat'; else if (gap < 0.29) r.works = 'Others';
+        rows.push(r); extra[r.id] = [opn, opd];
+      }
+    }));
+    const log = rows.map(r => ({ on: r.updOn, username: 'user', by: r.updBy.split(' (')[0], desig: (r.updBy.split(' (')[1] || '').replace(/[,)].*$/, ''), mobile: '',
+      circle: r.circle, division: r.division, vid: r.id, vname: r.name, action: 'Added', field: LABEL.name, old: '', value: r.name }));
+    rows.filter((r, i) => i % 6 === 2).forEach(r => log.push({ on: r.updOn.replace(/:00$/, ':30'), username: 'user', by: r.updBy.split(' (')[0], desig: (r.updBy.split(' (')[1] || '').replace(/[,)].*$/, ''),
+      mobile: '', circle: r.circle, division: r.division, vid: r.id, vname: r.name, action: 'Edited', field: LABEL.doj, old: '01-01-2025', value: r.doj }));
+    const ts = s => s.replace(/^(\d{2})-(\d{2})-(\d{4})/, '$3$2$1');
+    log.sort((a, b) => ts(b.on).localeCompare(ts(a.on)));
+    const ver = {};
+    rows.forEach(r => { const k = r.circle + '|' + r.division; if (!ver[k] || ts(r.updOn) > ts(ver[k].on)) ver[k] = { n: 1, on: r.updOn, by: r.updBy }; });
     return { rows, log, ver };
   }
   function db() { try { const d = JSON.parse(localStorage.getItem(KEY) || 'null'); if (d) return d; } catch (e) {} const d = seed(); put(d); return d; }

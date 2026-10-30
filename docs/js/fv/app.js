@@ -188,7 +188,7 @@
         <span class="av">${esc(initials(nm))}</span><span class="hide-sm">${esc(nm)}</span><span aria-hidden="true">▾</span></button>
       <div class="menu hidden" id="menu" role="menu">
         <div class="menu-who"><b>${esc(nm)}</b><span>${esc(o && o.designation || '')}${u.username ? ' · signed in as ' + esc(u.username) : ''}</span></div>
-        ${u.isAdmin ? '<a role="menuitem" href="#/admin">Dashboard</a>' : ''}
+        ${u.isAdmin ? '<a role="menuitem" href="#/admin">Dashboard</a><a role="menuitem" href="#/admin/reports">Reports</a>' : ''}
         <a role="menuitem" href="#/circles">All circles</a>
         ${u.isAdmin && !API.DEMO ? '' : '<button role="menuitem" id="meBtn">My details</button>'}
         <button role="menuitem" id="outBtn">Sign out</button>
@@ -732,74 +732,11 @@
   });
   window.addEventListener('beforeunload', e => { if (G && $('#grid') && dirty()) { e.preventDefault(); e.returnValue = ''; } });
 
-  /* ---------------- admin dashboard ---------------- */
-  const A = { q: '', act: 'all', circle: 'all', data: null };
+  /* ---------------- admin dashboard and reports (js/dashboard.js) ---------------- */
+  window.FV_APP = { esc, enc, icon, toast, go, guard, loading, download, shortWhen, missingOfSaved, fromServer, DUTIES, QUALS, meta, divCount, divSaved };
   async function renderAdmin() {
     if (!API.user || !API.user.isAdmin) { go('#/circles'); return; }
-    app.innerHTML = `<div class="head"><div><h1 class="page-title">Dashboard.</h1><p class="page-sub">Volunteers entered by each division, and every change made.</p></div></div>${loading('Collecting all divisions…')}`;
-    const [m, d] = await Promise.all([meta(true), guard(() => API.call('admin'))]);
-    A.data = d; drawAdmin(m, d);
-  }
-  function drawAdmin(m, d) {
-    const allDivs = [].concat(...m.circles.map(c => c.divisions.map(dv => ({ circle: c.circle, division: dv }))));
-    const started = allDivs.filter(x => divCount(x.circle, x.division)).length;
-    const doneBy = {}; d.rows.forEach(r => { if (!missingOfSaved(r).length) { const k = r.circle + '|' + r.division; doneBy[k] = (doneBy[k] || 0) + 1; } });
-    const doneAll = Object.values(doneBy).reduce((a, b) => a + b, 0);
-    const today = (() => { const t = new Date(); return `${String(t.getDate()).padStart(2, '0')}-${String(t.getMonth() + 1).padStart(2, '0')}-${t.getFullYear()}`; })();
-    const savesToday = new Set(d.log.filter(l => l.on.startsWith(today)).map(l => l.on + l.division)).size;
-    app.innerHTML = `<div class="head"><div><h1 class="page-title">Dashboard.</h1><p class="page-sub">Volunteers entered by each division, and every change made. Saves go in directly; nothing waits for approval.</p></div>
-        <span class="sp"></span>${d.sheetUrl ? `<a class="btn soft" href="${esc(d.sheetUrl)}" target="_blank" rel="noopener">${icon.sheet} Open Google Sheet</a>` : ''}</div>
-      <div class="kpis">
-        <div class="kpi"><span>Total volunteers added</span><b style="color:var(--prelims-ink)">${doneAll}</b><small class="faint">all details complete</small></div>
-        <div class="kpi"><span>Details missing</span><b style="color:var(--optional-ink)">${d.rows.length - doneAll}</b><small class="faint">saved, not complete</small></div>
-        <div class="kpi"><span>Divisions entered</span><b>${started} <small style="font-size:15px;color:var(--text-subtle);font-weight:600">of ${allDivs.length}</small></b></div>
-        <div class="kpi"><span>Changes recorded</span><b>${d.logTotal}</b></div>
-        <div class="kpi"><span>Saves today</span><b>${savesToday}</b></div>
-      </div>
-      <div class="adm-grid">
-        <div class="tablecard"><div class="tc-head"><h2>Divisions</h2><span class="sp"></span>
-            <select id="admCircle" class="btn sm" aria-label="Circle"><option value="all">All circles</option>${m.circles.map(c => `<option${A.circle === c.circle ? ' selected' : ''}>${esc(c.circle)}</option>`).join('')}</select>
-            <button class="btn sm" id="dlAll">${icon.down} All volunteers (Excel)</button></div>
-          <div class="tscroll"><table class="dtable"><thead><tr><th>Division</th><th class="r">Added</th><th class="r">Details missing</th><th>Last saved</th><th>By</th></tr></thead><tbody id="divBody"></tbody></table></div></div>
-        <div class="tablecard"><div class="tc-head"><h2>Change log</h2>
-            <div class="seg" id="actSeg">${['all', 'Added', 'Edited', 'Removed'].map(a => `<button data-a="${a}" class="${A.act === a ? 'on' : ''}">${a === 'all' ? 'All' : a}</button>`).join('')}</div>
-            <span class="sp"></span><label class="adm-search"><input id="logQ" placeholder="Search name, division, person…" value="${esc(A.q)}" aria-label="Search the change log"></label>
-            <button class="btn sm" id="dlLog">${icon.down} Change log (Excel)</button></div>
-          <div class="tscroll"><table class="dtable"><thead><tr><th>When</th><th>Saved by</th><th>Division</th><th>Volunteer</th><th>What</th><th>Old → new</th></tr></thead><tbody id="logBody"></tbody></table></div>
-          <div class="faint" id="logMore" style="padding:10px 16px"></div></div>
-      </div>`;
-    const drawDivs = () => {
-      $('#divBody').innerHTML = m.circles.filter(c => A.circle === 'all' || c.circle === A.circle).map(c =>
-        `<tr class="plainrow"><td colspan="5" class="circle-h">${esc(c.circle)} <span class="faint">· ${c.divisions.reduce((a, dv) => a + (doneBy[c.circle + '|' + dv] || 0), 0)} added · ${c.divisions.reduce((a, dv) => a + divCount(c.circle, dv) - (doneBy[c.circle + '|' + dv] || 0), 0)} details missing</span></td></tr>` +
-        c.divisions.map(dv => { const s = divSaved(c.circle, dv), n = divCount(c.circle, dv), dn = doneBy[c.circle + '|' + dv] || 0;
-          return `<tr data-go="#/d/${enc(c.circle)}/${enc(dv)}"><td class="tn">${esc(dv)}</td><td class="r num">${dn}</td><td class="r num">${n - dn ? `<span class="miss-n">${n - dn}</span>` : '0'}</td><td>${s ? esc(shortWhen(s.on)) : '<span class="not-started">Not started</span>'}</td><td>${s ? esc(s.by) : ''}</td></tr>`; }).join('')).join('');
-    };
-    const drawLog = () => {
-      const q = A.q.toLowerCase().trim();
-      const list = d.log.filter(l => (A.act === 'all' || l.action === A.act) && (A.circle === 'all' || l.circle === A.circle) &&
-        (!q || [l.by, l.desig, l.username, l.division, l.circle, l.vname, l.field, l.old, l.value].join(' ').toLowerCase().includes(q)));
-      $('#logBody').innerHTML = list.slice(0, 400).map(l => `<tr class="plainrow"><td class="num" style="white-space:nowrap">${esc(shortWhen(l.on))}</td>
-        <td><b>${esc(l.by)}</b><div class="faint">${esc(l.desig)}${l.mobile ? ' · ' + esc(l.mobile) : ''}${l.username ? ' · ' + esc(l.username) : ''}</div></td>
-        <td>${esc(l.division)}<div class="faint">${esc(l.circle)}</div></td><td>${esc(l.vname)}</td>
-        <td><span class="act-tag ${esc(l.action)}">${esc(l.action)}</span>${l.field ? `<div class="faint">${esc(l.field)}</div>` : ''}</td>
-        <td>${l.old ? `<span class="chg-old">${esc(l.old)}</span>` : ''}${l.old && l.value ? ' → ' : ''}${l.value ? `<span class="chg-new">${esc(l.value)}</span>` : ''}</td></tr>`).join('')
-        || '<tr class="plainrow"><td colspan="6" class="muted" style="padding:24px;text-align:center">No changes match.</td></tr>';
-      $('#logMore').textContent = list.length > 400 ? `Showing the latest 400 of ${list.length}. Download the change log for all of them.` : `${list.length} change${list.length === 1 ? '' : 's'}`;
-    };
-    drawDivs(); drawLog();
-    $('#divBody').onclick = e => { const tr = e.target.closest('[data-go]'); if (tr) go(tr.dataset.go); };
-    $('#admCircle').onchange = e => { A.circle = e.target.value; drawDivs(); drawLog(); };
-    $('#actSeg').onclick = e => { const b = e.target.closest('[data-a]'); if (!b) return; A.act = b.dataset.a; $('#actSeg').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); drawLog(); };
-    $('#logQ').oninput = e => { A.q = e.target.value; drawLog(); };
-    $('#dlAll').onclick = () => {
-      const rows = d.rows.filter(r => A.circle === 'all' || r.circle === A.circle).sort((a, b) => (a.circle + a.division).localeCompare(b.circle + b.division) || (+a.sl - +b.sl));
-      download(`Forest Volunteers${A.circle === 'all' ? '' : ' - ' + A.circle}.csv`, [['Sl No', 'Circle', 'Division', 'Name of Forest Volunteer Engaged', 'Date of Birth', 'Educational Qualification',
-        'Forest Dept.\'s approval ref', 'Forest Directorate\'s Ref no sent to the Circle in Charge', 'Appointment Order issued by/ reference', 'Date of Joining',
-        'Posted at (Div HQ / Range)', 'Range name', 'Within the range (Range HQ / Beat / Camp)', 'Nature of Works assigned', 'Details complete', 'Details missing', 'Last Updated On', 'Last Updated By', 'Volunteer ID']]
-        .concat(rows.map((r, i) => { const m = missingOfSaved(r); return [i + 1, r.circle, r.division, r.name, r.dob, r.qual, r.deptRef, r.dirRef, r.apptRef, r.doj, r.placeType, r.placeName, r.placeSub, r.works, m.length ? 'No' : 'Yes', m.join(', '), r.updOn, r.updBy, r.id]; })));
-    };
-    $('#dlLog').onclick = () => download('Forest Volunteers - change log.csv', [['When', 'Saved by', 'Designation', 'Mobile', 'Username', 'Circle', 'Division', 'Volunteer ID', 'Volunteer', 'Action', 'Field', 'Old value', 'New value']]
-      .concat(d.log.map(l => [l.on, l.by, l.desig, l.mobile, l.username, l.circle, l.division, l.vid, l.vname, l.action, l.field, l.old, l.value])));
+    await window.FV_DASH.render(app);
   }
 
   /* ---------------- router ---------------- */
@@ -827,5 +764,7 @@
     }
     lastHash = location.hash; route();
   });
-  if (API.user) start(); else route();
+  // start once every script is in (the dashboard is in its own file, loaded after this one)
+  const boot = () => { if (API.user) start(); else route(); };
+  if (document.readyState === 'complete') boot(); else document.addEventListener('DOMContentLoaded', boot);
 })();
