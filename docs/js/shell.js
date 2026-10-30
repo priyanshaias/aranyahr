@@ -98,7 +98,7 @@
     const circle = L.circles.find(c => c.circle === ff.circle);
     app.innerHTML = card('Create an account', '', `<form class="form" id="f" novalidate>
       <label>Account for<div class="seg hr-seg">${L.levels.map(l => `<button type="button" data-level="${l}" class="${l === level ? 'on' : ''}">${l === 'State' ? 'State (Directorate)' : l}</button>`).join('')}</div></label>
-      ${level === 'Division' ? '' : `<div class="notice info">${level} accounts can view every division ${level === 'Circle' ? 'of the circle' : ''}, not change them. They work after the admin approves them.</div>`}
+      <div class="notice info">${level === 'Division' ? 'Your account will work after the admin approves it.' : `${level} accounts can view every division ${level === 'Circle' ? 'of the circle' : ''}, not change them. They work after the admin approves them.`}</div>
       ${level === 'State' ? '' : `<label>Circle<select name="circle"><option value="">— Choose —</option>${L.circles.map(c => `<option ${c.circle === ff.circle ? 'selected' : ''}>${esc(c.circle)}</option>`).join('')}</select></label>`}
       ${level === 'Division' ? `<label>Division<select name="division" ${circle ? '' : 'disabled'}><option value="">— Choose —</option>${circle ? circle.divisions.map(d => `<option ${d === ff.division ? 'selected' : ''}>${esc(d)}</option>`).join('') : ''}</select></label><div id="taken"></div>` : ''}
       ${field('email', 'Email <span class="faint">(you will sign in with it)</span>', 'email', `autocomplete="email" value="${esc(ff.email || '')}"`)}
@@ -286,7 +286,7 @@
     const box = (title, count, sub, href) => `<a class="tile" href="${href}" style="text-decoration:none"><div class="t"><b>${esc(title)}</b><span>${sub}</span><br><span class="num hr-big">${count}</span> <span class="faint">waiting</span></div></a>`;
     app.innerHTML = `<div class="head"><div><h1 class="page-title">Approvals.</h1><p class="page-sub">What is waiting for an admin, cadre by cadre. Each opens that cadre’s own approval screen.</p></div></div>
       <div class="tiles">
-        ${box('User accounts', ov.pendingUsers, 'Second users of a division, circle and state accounts', '#/users')}
+        ${box('User accounts', ov.pendingUsers, 'New accounts waiting for approval', '#/users')}
         ${box('FR, DR/Fr, FG', off ? off.pending : '—', 'Corrections and new officers sent by divisions', 'officers.html#/admin')}
         ${box('DL / CDL and Ban Sahayak', n(['CDL', 'BS']), 'New DLs / CDLs and removals', 'cdl.html#/approvals')}
         ${box('Aranya Sathi and DEO', n(['AS', 'DEO']), 'Removals', 'cdl.html?set=sathi#/approvals')}
@@ -304,7 +304,7 @@
     const chip = (v, t) => `<button class="chip ${U.filter === v ? 'on' : ''}" data-f="${v}">${t}<span class="n">${count(v)}</span></button>`;
     const pill = s => `<span class="pill ${s === 'Active' ? 'verified' : s === 'Pending approval' ? 'pending' : 'unverified'}">${esc(s)}</span>`;
     const where = r => r.level === 'Division' ? `${esc(r.division)}<div class="faint">${esc(r.circle)}</div>` : r.level === 'Circle' ? `${esc(r.circle)} circle<div class="faint">view only</div>` : 'State<div class="faint">view only</div>';
-    app.innerHTML = `<div class="head"><div><h1 class="page-title">Users.</h1><p class="page-sub">The first user of a division works at once. Second users, circle and state accounts wait for you here.</p></div></div>
+    app.innerHTML = `<div class="head"><div><h1 class="page-title">Users.</h1><p class="page-sub">Every new account waits for your approval here.</p></div></div>
       <div class="toolbar"><div class="chips">${chip('Pending approval', 'Waiting')}${chip('Active', 'Active')}${chip('Disabled', 'Disabled')}${chip('Rejected', 'Rejected')}${chip('', 'Everyone')}</div>
         <select id="ul" class="hr-select"><option value="">All levels</option>${['Division', 'Circle', 'State'].map(l => `<option ${U.level === l ? 'selected' : ''}>${l}</option>`).join('')}</select>
         <label class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="uq" type="search" placeholder="Search name, email, division" value="${esc(U.q)}"></label></div>

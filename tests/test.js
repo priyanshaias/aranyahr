@@ -21,14 +21,15 @@ const urow = books.HR.getSheetByName('Users').v.find(r => r[0] === 'old@x.in'), 
 assert.strictEqual(urow[H.indexOf('Password')], 'oldpassword'); assert.strictEqual(urow[H.indexOf('Old hash')], '');
 ok(T.post({ action: 'login', username: 'old@x.in', password: 'oldpassword' }));
 
-// sign-up: Kurseong already has old@x.in -> second user waits; a new division's first user works at once; circle and state wait
+// sign-up: every new account waits for approval; Kurseong already has old@x.in, so that one is told it is the second user
 const base = { name: 'New Person', desig: 'DFO', phone: '9876500000', password: 'password12' };
 assert.strictEqual(ok(T.post({ action: 'divisionUsers', division: 'Kurseong' })).count, 1);
 const sec = ok(T.post(Object.assign({ action: 'signup', email: 'two@x.in', level: 'Division', circle: 'Hill', division: 'Kurseong' }, base)));
 assert(sec.pending && sec.second && /second user/.test(sec.message), JSON.stringify(sec));
 bad(T.post({ action: 'login', username: 'two@x.in', password: 'password12' }), /waiting for the admin/);
 const first = ok(T.post(Object.assign({ action: 'signup', email: 'dj@x.in', level: 'Division', circle: 'Hill', division: 'Darjeeling' }, base)));
-assert(first.token, 'first user signed in');
+assert(first.pending && !first.second && !first.token, 'first user of a division waits too');
+bad(T.post({ action: 'login', username: 'dj@x.in', password: 'password12' }), /waiting for the admin/);
 const circ = ok(T.post(Object.assign({ action: 'signup', email: 'ccf@x.in', level: 'Circle', circle: 'Hill' }, base)));
 assert(circ.pending && !circ.second);
 ok(T.post(Object.assign({ action: 'signup', email: 'state@x.in', level: 'State' }, base)));
@@ -36,11 +37,13 @@ ok(T.post(Object.assign({ action: 'signup', email: 'state@x.in', level: 'State' 
 // admin approves the circle user
 const adm = ok(T.post({ action: 'login', username: 'grv', password: 'admin-pass-1' })).token;
 bad(T.post({ action: 'login', username: 'grv', password: 'nope' }), /Wrong/);
-const ov0 = ok(T.post({ action: 'overview', token: adm })); assert.strictEqual(ov0.pendingUsers, 3);
+const ov0 = ok(T.post({ action: 'overview', token: adm })); assert.strictEqual(ov0.pendingUsers, 4);
 const us = ok(T.post({ action: 'users', token: adm })); assert(us.rows.find(r => r.email === 'two@x.in').password === 'password12');
 ok(T.post({ action: 'userDecide', token: adm, email: 'ccf@x.in', approve: true }));
 assert(T.mail.some(m => m.to === 'ccf@x.in' && /approved/.test(m.subject)));
 const ccf = ok(T.post({ action: 'login', username: 'ccf@x.in', password: 'password12' })).token;
+ok(T.post({ action: 'userDecide', token: adm, email: 'dj@x.in', approve: true }));
+const djTok = ok(T.post({ action: 'login', username: 'dj@x.in', password: 'password12' })).token;
 
 // division user: home shows all cadres of their own division, ranges matched
 const ku = s0.token;
@@ -107,11 +110,11 @@ ok(T.post({ action: 'setSetting', token: adm, key: 'Email code at sign-up', valu
 assert(ok(T.post({ action: 'lists' })).emailCode);
 assert(ok(T.post(Object.assign({ action: 'signup', email: 'jal@x.in', level: 'Division', circle: 'Northern', division: 'Jalpaiguri' }, base))).sent);
 const code = /code is (\d{6})/.exec(T.mail[T.mail.length - 1].body)[1];
-assert(ok(T.post({ action: 'signupVerify', email: 'jal@x.in', code })).token);
+assert(ok(T.post({ action: 'signupVerify', email: 'jal@x.in', code })).pending);
 ok(T.post({ action: 'sendVerify', token: adm, email: 'dj@x.in' }));
 const tok = /verify=(\w+)/.exec(T.mail[T.mail.length - 1].body)[1];
 assert(/is verified/.test(T.ctx.doGet({ parameter: { verify: tok } })));
 assert.strictEqual(ok(T.post({ action: 'users', token: adm })).rows.find(r => r.email === 'dj@x.in').verified, 'Yes');
 ok(T.post({ action: 'userStatus', token: adm, email: 'dj@x.in', active: false }));
-bad(T.post({ action: 'home', token: first.token }), /disabled/);
+bad(T.post({ action: 'home', token: djTok }), /disabled/);
 console.log('All checks passed.');

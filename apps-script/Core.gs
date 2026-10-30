@@ -307,21 +307,17 @@ function signup_(body) {
   return { sent: true };
 }
 function signupVerify_(body) { const o = takeCode_('hr:su|' + hrEmail_(body.email), body.code); return createUser_(o.user, true); }
-/**
- * The first user of a division works at once; a second user of the division, and every circle and state user, waits for the admin.
- * Returns a session when the account is active, else {pending, message}.
- */
+/** Every new account waits for the admin's approval. A second user of a division is told so. Returns {pending, second, message}. */
 function createUser_(u, verified) {
   const r = hrLock_(() => {
     const t = readUsers_();
     if (t.rows.some(x => x.email === u.email)) throw new Error('This email already has an account. Please sign in.');
     const taken = u.level === 'Division' && t.rows.some(x => (x.level || 'Division') === 'Division' && x.division === u.division && (x.status === ST.active || x.status === ST.pending));
-    const o = Object.assign({}, u, { status: u.level === 'Division' && !taken ? ST.active : ST.pending, verified: verified ? 'Yes' : 'No', on: hrNow_(), last: '' });
+    const o = Object.assign({}, u, { status: ST.pending, verified: verified ? 'Yes' : 'No', on: hrNow_(), last: '' });
     const row = t.head.map(h => { const c = USER_COLS.find(x => x[1] === h); return c ? (o[c[0]] || '') : ''; });
     t.sh.getRange(t.sh.getLastRow() + 1, 1, 1, row.length).setNumberFormat('@').setValues([row]);
     return Object.assign(o, { taken });
   });
-  if (r.status === ST.active) return hrLogin_({ username: u.email, password: u.password });
   return { pending: true, second: r.taken, message: r.taken
     ? 'You are the second user for ' + u.division + '. Your account is made, but please contact the admin to approve it.'
     : 'Your account is made. It will work after the admin approves it.' };

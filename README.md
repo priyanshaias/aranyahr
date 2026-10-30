@@ -25,12 +25,12 @@ GitHub Pages (docs/)                 ──►  "AranyaHR API" (one Apps Script 
 
 | Account for | Sees | Can change | Works |
 |---|---|---|---|
-| Division | their own division | their own division, every cadre | the first user of a division at once; a second user after the admin approves |
+| Division | their own division | their own division, every cadre | after the admin approves |
 | Circle | every division of the circle | nothing | after the admin approves |
 | State | everything | nothing | after the admin approves |
 | Admin (`Config.local.gs`) | everything | everything, approvals, users | always |
 
-- **Sign-up** is on the AranyaHR page. When a division already has a user, the form tells the new person that they will be the second user and must ask the admin to approve the account.
+- **Sign-up** is on the AranyaHR page. Every new account waits on the admin's **Users** page until it is approved; the person is emailed when it is. When a division already has a user, the form tells the new person that they will be the second user and must ask the admin to approve the account.
 - **Passwords are kept as plain text**, as decided: in the Password column of the Users tab, and admins' in `Config.local.gs`. Keep the **AranyaHR · Users** sheet shared with nobody, and hide and protect its Users tab. The website shows a password only to an admin, on the Users page.
 - **Users moved from CDL+BS** keep their old password. CDL+BS kept only a hash, so the hash is checked once at their next sign-in; the typed password is saved then and the hash is removed.
 - **Email verification is optional.** Settings → "Email code at sign-up" (off by default) asks for a 6-digit code before the account is made. On the Users page, **Send email** mails anyone a link that marks their address as verified. "Forgot password" always sends a code.
