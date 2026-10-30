@@ -36,6 +36,32 @@ GitHub Pages (docs/)                 ──►  "AranyaHR API" (one Apps Script 
 - **Email verification is optional.** Settings → "Email code at sign-up" (off by default) asks for a 6-digit code before the account is made. On the Users page, **Send email** mails anyone a link that marks their address as verified. "Forgot password" always sends a code.
 - The server enforces all of this. A division user's request is always for their own division, whatever the website sends.
 
+## Dashboard (`#/dash`)
+
+For admins, and read-only for circle and state accounts (a circle account sees its own circle).
+
+- **Three levels:** State → circle → division. Use the selectors at the top, or click any circle or division in a chart or table.
+- **Two lenses:**
+  - **Progress:** how much of each list is filled and verified, and who to follow up with. It has:
+    - % verified, divisions complete, divisions not started, changes awaiting the admin, divisions with a user, and divisions with no save for 7+ days;
+    - progress by circle or division, worst first;
+    - divisions grouped by % verified;
+    - when each division last saved;
+    - a division × cadre heatmap;
+    - a card for each cadre;
+    - a sortable table of every division.
+  - **Workforce:** who is where. It has:
+    - people by cadre and by group;
+    - people by circle or division, stacked by cadre;
+    - where no one has been listed yet for a cadre;
+    - a division × cadre count table.
+- **Cadre filter:** one cadre, or all eight, applies to every chart. Each cadre keeps the same colour everywhere.
+- **One division:** progress by cadre and by range, a range × cadre heatmap, people by range, and links to each cadre's page.
+- **CSV** downloads what is in view, division by cadre.
+- The filters are kept in the address, so a link opens the same view.
+
+Preview it on a larger set of made-up data with `node tests/devserver.js 8781 --big`.
+
 ## Divisions and ranges
 
 - **Divisions tab:** one row per division, with its name in each sheet (`In FR DFR FG`, `In FV`, `In CDL+BS`, each as `Circle | Division`). `hrSetup()` fills it the first time by matching names; **check it and fill any blank cell by hand.**

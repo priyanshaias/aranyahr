@@ -100,6 +100,9 @@ const ovc = ok(T.post({ action: 'overview', token: ccf })); assert(ovc.rows.ever
 const ov = ok(T.post({ action: 'overview', token: adm })); const ko = ov.rows.find(r => r.division === 'Kurseong').c;
 console.log('Overview Kurseong:', JSON.stringify(ko));
 assert.strictEqual(ko.FR.done, 1); assert.strictEqual(ko.FV.total, 1); assert.strictEqual(ko.AS.done, 1);
+['FR', 'DFR', 'FG', 'FV', 'CDL', 'AS', 'DEO'].forEach(k => { const x = ko[k]; assert.strictEqual(x.done + x.mid + x.wait + x.todo, x.total, k + ' adds up'); });
+assert.strictEqual(ko.CDL.appr, 1, 'the new DL waits for the admin'); assert(ko.FR.last, 'FR has a last save');
+assert.strictEqual(ov.rows.find(r => r.division === 'Kurseong').users, 1);
 books.HR.getSheetByName('Ranges').v.push(['Hill', 'Kurseong', 'Bagdogra', '']); T.run("CacheService.getScriptCache().remove('hr:ranges')");
 ok(T.post({ action: 'off.submit', token: ku, cadre: 'DFR', id: 'D1', changes: [{ field: 'Present Range / Office', value: 'Bagdogra Rng' }] }));
 const rg = ok(T.post({ action: 'ranges', token: adm, division: 'Kurseong' })); console.log('Ranges Kurseong:', JSON.stringify(rg));

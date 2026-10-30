@@ -430,16 +430,26 @@ function home_(body, user) {
   });
   return { circle: d.circle, division: d.division, own: ownAll_(d.circle, d.division), people, ranges: (ranges[d.division] || []).map(x => x.range), lists: lists_() };
 }
-/** Every division with each cadre's counts: {total, done} (done = verified / complete). */
+/**
+ * One division's counts for one cadre, as every module reports them: total = done + mid + wait + todo.
+ * done verified (FV: complete) · mid partly verified / ready to verify · wait awaiting the admin · todo not yet;
+ * appr: changes waiting for an admin · last: the latest save ("dd-mm-yyyy HH:mm").
+ */
+function countRow_(circle, division, cadre) { return { circle, division, cadre, total: 0, done: 0, mid: 0, wait: 0, todo: 0, appr: 0, last: '' }; }
+const whenKey_ = s => { const m = /^(\d{2})-(\d{2})-(\d{4})(?: (\d{2}):(\d{2}))?/.exec(s || ''); return m ? m[3] + m[2] + m[1] + (m[4] || '00') + (m[5] || '00') : ''; };
+const laterOf_ = (a, b) => whenKey_(b) > whenKey_(a) ? String(b).slice(0, 16) : a;
+/** Every division with each cadre's counts (countRow_), its active division users, and what waits for an admin. */
 function overview_(body, user) {
-  const rows = divs_().map(d => ({ circle: d.circle, division: d.division, c: {} }));
+  const users = readUsers_().rows, active = {};
+  users.forEach(r => { if (r.status === ST.active && (r.level || 'Division') === 'Division') active[r.division] = (active[r.division] || 0) + 1; });
+  const rows = divs_().map(d => ({ circle: d.circle, division: d.division, users: active[d.division] || 0, c: {} }));
   const at = {}; rows.forEach(r => at[r.division] = r);
   Object.keys(modules_()).forEach(m => modules_()[m].counts().forEach(x => {
     const canon = canonOf_(m, x.circle, x.division), r = canon && at[canon.division];
     if (r) r.c[x.cadre] = x;
   }));
   const shown = !user.isAdmin && user.level === 'Circle' ? rows.filter(r => r.circle === user.circle) : user.isAdmin || user.level === 'State' ? rows : [];
-  return { rows: shown, pendingUsers: user.isAdmin ? readUsers_().rows.filter(r => r.status === ST.pending).length : 0 };
+  return { rows: shown, builtAt: hrNow_(), pendingUsers: user.isAdmin ? users.filter(r => r.status === ST.pending).length : 0 };
 }
 /** Admins: the Ranges tab and, per division, the range spellings that did not match. */
 function ranges_(body) {

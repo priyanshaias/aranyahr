@@ -518,7 +518,12 @@ function people_(circle, division) {
 }
 function counts_() {
   const m = gzGet_('meta') || buildAll_().m, out = [];
-  m.divisions.forEach(d => CADRES.forEach(c => { const k = d[c]; if (k && k.all) out.push({ circle: d.circle, division: d.division, cadre: c, total: k.active, done: k.confirmed }); }));
+  // done verified · mid ready to verify · wait removal waiting for the admin · todo missing details or a problem
+  m.divisions.forEach(d => CADRES.forEach(c => {
+    const k = d[c]; if (!k || !k.all) return;
+    out.push(Object.assign(countRow_(d.circle, d.division, c), { total: k.all, done: k.confirmed, mid: k.ready, wait: k.remove, todo: k.missing + k.problem,
+      appr: k.remove + k.added, last: (d.last && d.last[c]) || '' }));
+  }));
   return out;
 }
 /** The users of the earlier CDL+BS app (its Users tab), for hrSetup to move to AranyaHR. */

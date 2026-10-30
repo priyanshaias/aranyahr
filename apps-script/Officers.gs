@@ -683,8 +683,10 @@ function counts_() {
   Object.keys(divs).forEach(k => divs[k].officers.forEach(o => {
     if (o.incoming) return;
     const c = o.data['Circle'], d = o.data['Division'], key = c + '|' + d + '|' + o.cadre;
-    const x = out[key] = out[key] || { circle: c, division: d, cadre: o.cadre, total: 0, done: 0 };
-    x.total++; if (o.status === 'verified') x.done++;
+    const x = out[key] = out[key] || countRow_(c, d, o.cadre);
+    x.total++; x[{ verified: 'done', partial: 'mid', pending: 'wait' }[o.status] || 'todo']++;
+    if (o.status === 'pending') x.appr++;
+    x.last = laterOf_(x.last, o.data['Last Updated On']);
   }));
   return Object.keys(out).map(k => out[k]);
 }

@@ -46,7 +46,7 @@
     $('#demoFlag').classList.toggle('hidden', !API.DEMO);
     if (!u) { $('#who').innerHTML = ''; return; }
     const where = u.isAdmin ? 'Admin' : u.level === 'Division' ? u.division : u.level === 'Circle' ? u.circle + ' circle (view only)' : 'State (view only)';
-    const links = [['#/', 'Home'], (u.isAdmin || u.level !== 'Division') && ['#/admin', 'Overview'],
+    const links = [['#/', 'Home'], (u.isAdmin || u.level !== 'Division') && ['#/dash', 'Dashboard'],
       u.isAdmin && ['#/approvals', 'Approvals'], u.isAdmin && ['#/users', 'Users'], u.isAdmin && ['#/ranges', 'Ranges'], u.isAdmin && ['#/settings', 'Settings']].filter(Boolean);
     $('#who').innerHTML = `${links.slice(1, 4).map(([h, t]) => `<a class="btn sm ghost hide-sm" href="${h}">${t}</a>`).join('')}
       <button class="menu-btn" id="menuBtn" aria-haspopup="true" aria-expanded="false">
@@ -255,29 +255,6 @@
       <div class="head"><div><h1 class="page-title">${esc(circle)} circle.</h1><p class="page-sub">Choose a division.</p></div></div>
       <div class="tiles">${o.rows.filter(r => r.circle === circle).map(r => tile(r.division, 'Division', sumOf(r, ks), '#/d/' + enc(r.division))).join('')}</div>`;
   }
-  async function renderOverview() {
-    app.innerHTML = loader('Counting every cadre…');
-    const o = await loadOverview(true), u = API.user;
-    const ks = CADRES.map(c => c.k), circles = [...new Set(o.rows.map(r => r.circle))];
-    const draw = () => {
-      const c = $('#ovc') ? $('#ovc').value : '', rows = o.rows.filter(r => !c || r.circle === c);
-      const tot = k => rows.reduce((a, r) => { const x = r.c[k]; if (x) { a.total += x.total; a.done += x.done; } return a; }, { total: 0, done: 0 });
-      $('#ovk').innerHTML = CADRES.map(cd => { const t = tot(cd.k); return `<div class="kpi"><span>${esc(cd.label)}</span><b>${t.total.toLocaleString('en-IN')}</b><span>${pct(t.done, t.total)}% ${cd.k === 'FV' ? 'complete' : 'verified'}</span></div>`; }).join('');
-      $('#ovt').innerHTML = rows.map(r => `<tr data-go="#/d/${enc(r.division)}" tabindex="0"><td><b>${esc(r.division)}</b><div class="faint">${esc(r.circle)}</div></td>
-        ${ks.map(k => { const x = r.c[k]; return x && x.total ? `<td class="num"><span class="hr-cell" style="--p:${pct(x.done, x.total)}%">${x.done}/${x.total}</span></td>` : '<td class="faint">—</td>'; }).join('')}</tr>`).join('');
-      $('#ovt').querySelectorAll('tr[data-go]').forEach(tr => tr.onclick = () => go(tr.dataset.go));
-    };
-    app.innerHTML = `<div class="head"><div><h1 class="page-title">Overview.</h1><p class="page-sub">Every division, every cadre: verified (or complete, for FV) out of the total.</p></div><span class="sp"></span>
-        ${circles.length > 1 ? `<select id="ovc" class="hr-select"><option value="">All circles</option>${circles.map(c => `<option>${esc(c)}</option>`).join('')}</select>` : ''}</div>
-      <div class="kpis" id="ovk"></div>
-      ${u.isAdmin ? `<div class="hr-links"><b>Dashboards</b>
-        <a href="officers.html#/dash">FR, DR/Fr, FG</a><a href="officers.html#/report">Follow-up reports</a><a href="fv.html#/admin">FV</a>
-        <a href="cdl.html#/">DL / CDL and BS</a><a href="cdl.html?set=sathi#/">Aranya Sathi and DEO</a></div>` : ''}
-      <div class="tablecard"><div class="tscroll"><table class="hr-table hr-ov"><thead><tr><th>Division</th>${ks.map(k => `<th class="num" title="${esc(CAD[k].label)}">${k}</th>`).join('')}</tr></thead><tbody id="ovt"></tbody></table></div></div>`;
-    if ($('#ovc')) $('#ovc').onchange = draw;
-    draw();
-  }
-
   /* ---------------- admin: approvals ---------------- */
   async function renderApprovals() {
     app.innerHTML = loader('Collecting what is waiting…', 'Asking every cadre…');
@@ -387,7 +364,7 @@
   function start() { renderWho(); if (!location.hash || location.hash === '#/' || location.hash === '#/signup') { history.replaceState(null, '', '#/'); } route(); }
   async function route() {
     renderWho();
-    const parts = location.hash.replace(/^#\/?/, '').split('/').map(decodeURIComponent), u = API.user;
+    const parts = location.hash.replace(/^#\/?/, '').split('?')[0].split('/').map(decodeURIComponent), u = API.user;
     try {
       if (!u) {
         if (parts[0] === 'signup') await renderSignup(); else if (parts[0] === 'forgot') renderForgot(); else renderSignin();
@@ -395,7 +372,7 @@
       }
       if (parts[0] === 'd' && parts[1]) await renderHome(parts[1]);
       else if (parts[0] === 'c' && parts[1]) await renderPicker(parts[1]);
-      else if (parts[0] === 'admin' && (u.isAdmin || u.level !== 'Division')) await renderOverview();
+      else if ((parts[0] === 'dash' || parts[0] === 'admin') && (u.isAdmin || u.level !== 'Division')) await window.HR_DASH.render(app);
       else if (u.isAdmin && parts[0] === 'approvals') await renderApprovals();
       else if (u.isAdmin && parts[0] === 'users') await renderUsers(true);
       else if (u.isAdmin && parts[0] === 'ranges') await renderRanges(parts[1]);
@@ -404,6 +381,7 @@
     } catch (e) { /* toast already shown */ }
     window.scrollTo(0, 0);
   }
+  window.HR_SHELL = { esc, loader, guard, CAD, pageOf };   // for the dashboard (dash.js)
   window.addEventListener('hashchange', route);
   route();
 })();

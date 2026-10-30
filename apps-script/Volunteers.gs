@@ -316,7 +316,10 @@ function people_(circle, division) {
 }
 function counts_() {
   const out = {};
-  readAll_().forEach(r => { const k = r.circle + '|' + r.division, x = out[k] = out[k] || { circle: r.circle, division: r.division, cadre: 'FV', total: 0, done: 0 }; x.total++; if (complete_(r)) x.done++; });
+  readAll_().forEach(r => {
+    const k = r.circle + '|' + r.division, x = out[k] = out[k] || countRow_(r.circle, r.division, 'FV');
+    x.total++; x[complete_(r) ? 'done' : 'todo']++; x.last = laterOf_(x.last, r.updOn);
+  });
   return Object.keys(out).map(k => out[k]);
 }
 function divisions_() { const out = []; circles_().forEach(c => c.divisions.forEach(d => out.push({ circle: c.circle, division: d }))); return out; }
