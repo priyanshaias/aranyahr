@@ -1,3 +1,5 @@
 apps-script/Config.local.gs
 private/
 .DS_Store
+# real names: never in GitHub
+raw_data/
