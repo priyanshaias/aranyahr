@@ -106,6 +106,30 @@ Paste the changed files, run **hrSetup** once, then **Deploy → Manage deployme
 ### Admin password
 In `Config.local.gs`, set `password: '…'` in the admin's entry (or keep the `salt` and `hash` copied from UPMC2, which still work). No redeploy is needed.
 
+## Loading the Aranya Sathi (PDL) and DEO lists
+
+`python3 scripts/make_asdeo_import.py raw_data` makes `private/AS_import.csv` and `private/DEO_import.csv`. Both folders are on this computer only and never in GitHub.
+- **Aranya Sathi:** from `PDL List.xlsx`, sheet "Final Remuneration (1555)": all 1,555 people.
+  - Mode is Direct; the engagement date and the pay as on 01-01-2026 are filled in.
+  - Remarks carry category, G.O., date of birth and retirement.
+  - The 3 marked "Died" are *Removal pending, reason Deceased*, waiting for the admin.
+  - People with an unclear status in the list are marked "please check" in Remarks.
+- **DEO:** from `DEO.xlsx`: all 184 people.
+  - Project staff (WBFBCP, SFDA, CAMPA, watershed) and PCCF HoFF are under **APM Circle HQ**; the others are in their own division.
+  - Main duty is Others (data entry / software support). The 2020 pay is in Remarks.
+- Divisions then fill in district, range, place and duty, and verify, as for DL / CDL.
+
+To load them:
+1. Open **AranyaHR · AS+DEO** and click the **Aranya Sathi** tab.
+2. Go to **File → Import → Upload**, choose `private/AS_import.csv`, and set:
+   - Import location: **Append to current sheet**;
+   - Separator type: **Comma**;
+   - **untick "Convert text to numbers, dates, and formulas"**.
+
+   Then click **Import data**.
+3. Do the same on the **DEO** tab with `private/DEO_import.csv`.
+4. In Apps Script, run **hrSetup**, which reads the new rows into the cache.
+
 ## Bringing in work done in the old apps (FV and Ban Sahayak)
 
 `apps-script/Refresh.gs` copies into AranyaHR what divisions entered in the old FV and CDL+BS apps since the copies were made (29-10-2026 12:41). It only reads the old sheets.
