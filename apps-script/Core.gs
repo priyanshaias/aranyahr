@@ -13,6 +13,7 @@ const USER_COLS = [['email', 'Email'], ['level', 'Level'], ['circle', 'Circle'],
   ['phone', 'Mobile'], ['status', 'Status'], ['verified', 'Email verified'], ['password', 'Password'], ['on', 'Signed up on'], ['approvedBy', 'Approved by'],
   ['approvedOn', 'Approved on'], ['last', 'Last sign-in'], ['oldSalt', 'Old salt'], ['oldHash', 'Old hash']];
 const LEVELS = ['Division', 'Circle', 'State'];
+const SUPERADMIN = 'grv';   // the one admin who can also create users
 const ST = { active: 'Active', pending: 'Pending approval', disabled: 'Disabled', rejected: 'Rejected' };
 // the column of the Divisions tab that holds each module's own "Circle | Division"
 const MOD_COL = { off: 'In FR DFR FG', fv: 'In FV', cdl: 'In CDL+BS' };
@@ -65,10 +66,11 @@ function doPost(e) {
     const user = hrAuth_(body.token);
     if (a.indexOf('.') > 0) return hrJson_({ ok: true, data: callModule_(a, body, user) });
     const core = { home: home_, overview: overview_, users: users_, userDecide: userDecide_, userStatus: userStatus_, userPassword: userPassword_,
-      sendVerify: sendVerify_, settings: settings_, setSetting: setSetting_, ranges: ranges_, rangeAlias: rangeAlias_ };
+      sendVerify: sendVerify_, settings: settings_, setSetting: setSetting_, ranges: ranges_, rangeAlias: rangeAlias_, userCreate: userCreate_ };
     const fn = core[a];
     if (!fn) throw new Error('Unknown action: ' + a);
     if (a !== 'home' && a !== 'overview' && !user.isAdmin) throw new Error('Only administrators can do this.');
+    if (a === 'userCreate' && !user.isSuper) throw new Error('Only the superadmin can create users.');
     return hrJson_({ ok: true, data: fn(body, user) });
   } catch (err) {
     return hrJson_({ ok: false, error: String(err && err.message || err), conflict: !!(err && err.conflict) });
@@ -235,7 +237,7 @@ function hrLogin_(body) {
   const acc = hrLocal_().accounts[u];
   if (acc) {
     if (acc.password ? acc.password !== pw : hrSha_(acc.salt + pw) !== acc.hash) throw wrong();
-    user = { name: acc.name || u, username: u, email: acc.email || u, level: 'State', isAdmin: acc.role === 'admin', mods: acc.modules || null };
+    user = { name: acc.name || u, username: u, email: acc.email || u, level: 'State', isAdmin: acc.role === 'admin', isSuper: u === SUPERADMIN && acc.role === 'admin', mods: acc.modules || null };
     PropertiesService.getScriptProperties().setProperty('hr:last|' + u, hrNow_());
   } else {
     user = hrLock_(() => {
@@ -307,13 +309,18 @@ function signup_(body) {
   return { sent: true };
 }
 function signupVerify_(body) { const o = takeCode_('hr:su|' + hrEmail_(body.email), body.code); return createUser_(o.user, true); }
-/** Every new account waits for the admin's approval. A second user of a division is told so. Returns {pending, second, message}. */
-function createUser_(u, verified) {
+/** The superadmin makes an account for someone: it works at once (it is approved by the superadmin). */
+function userCreate_(body, user) {
+  createUser_(cleanSignup_(body), false, { status: ST.active, approvedBy: user.name + ' (created the account)', approvedOn: hrNow_() });
+  return users_();
+}
+/** Every new account waits for the admin's approval (unless extra says otherwise). A second user of a division is told so. Returns {pending, second, message}. */
+function createUser_(u, verified, extra) {
   const r = hrLock_(() => {
     const t = readUsers_();
     if (t.rows.some(x => x.email === u.email)) throw new Error('This email already has an account. Please sign in.');
     const taken = u.level === 'Division' && t.rows.some(x => (x.level || 'Division') === 'Division' && x.division === u.division && (x.status === ST.active || x.status === ST.pending));
-    const o = Object.assign({}, u, { status: ST.pending, verified: verified ? 'Yes' : 'No', on: hrNow_(), last: '' });
+    const o = Object.assign({}, u, { status: ST.pending, verified: verified ? 'Yes' : 'No', on: hrNow_(), last: '' }, extra || {});
     const row = t.head.map(h => { const c = USER_COLS.find(x => x[1] === h); return c ? (o[c[0]] || '') : ''; });
     t.sh.getRange(t.sh.getLastRow() + 1, 1, 1, row.length).setNumberFormat('@').setValues([row]);
     return Object.assign(o, { taken });

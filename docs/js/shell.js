@@ -265,7 +265,8 @@
     const chip = (v, t) => `<button class="chip ${U.filter === v ? 'on' : ''}" data-f="${v}">${t}<span class="n">${count(v)}</span></button>`;
     const pill = s => `<span class="pill ${s === 'Active' ? 'verified' : s === 'Pending approval' ? 'pending' : 'unverified'}">${esc(s)}</span>`;
     const where = r => r.level === 'Division' ? `${esc(r.division)}<div class="faint">${esc(r.circle)}</div>` : r.level === 'Circle' ? `${esc(r.circle)} circle<div class="faint">view only</div>` : 'State<div class="faint">view only</div>';
-    app.innerHTML = `<div class="head"><div><h1 class="page-title">Users.</h1><p class="page-sub">Every new account waits for your approval here.</p></div></div>
+    app.innerHTML = `<div class="head"><div><h1 class="page-title">Users.</h1><p class="page-sub">Every new account waits for your approval here.</p></div>
+        ${API.user.isSuper ? '<span class="sp"></span><button class="btn primary" id="uNew">+ Create user</button>' : ''}</div>
       <div class="toolbar"><div class="chips">${chip('Pending approval', 'Waiting')}${chip('Active', 'Active')}${chip('Disabled', 'Disabled')}${chip('Rejected', 'Rejected')}${chip('', 'Everyone')}</div>
         <select id="ul" class="hr-select"><option value="">All levels</option>${['Division', 'Circle', 'State'].map(l => `<option ${U.level === l ? 'selected' : ''}>${l}</option>`).join('')}</select>
         <label class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="uq" type="search" placeholder="Search name, email, division" value="${esc(U.q)}"></label></div>
@@ -284,6 +285,38 @@
     $('#ul').onchange = e => { U.level = e.target.value; renderUsers(); };
     $('#uq').oninput = e => { U.q = e.target.value; const at = e.target.selectionStart; renderUsers(); const i = $('#uq'); i.focus(); i.setSelectionRange(at, at); };
     app.querySelectorAll('[data-a]').forEach(b => b.onclick = () => userAct(b.dataset.a, b.dataset.e, b));
+    if ($('#uNew')) $('#uNew').onclick = () => newUser();
+  }
+  /** Superadmin only: make an account that works at once. */
+  function newUser(ff = { level: 'Division' }) {
+    const circles = U.data.circles || [], circle = circles.find(c => c.circle === ff.circle);
+    const pw = ff.password || Math.random().toString(36).slice(2, 6) + Math.floor(1000 + Math.random() * 9000);
+    const old = $('#uNewDlg'); if (old) old.remove();
+    const el = document.createElement('div'); el.className = 'scrim on'; el.id = 'uNewDlg';
+    el.innerHTML = `<div class="dialog hr-dl" role="dialog" aria-modal="true" aria-label="Create a user">
+      <div class="dhead"><div><h2>Create a user</h2><div class="sub">The account works at once. Tell them their email and password.</div></div><button class="x" aria-label="Close">×</button></div>
+      <div class="dbody"><form class="form" id="nf" novalidate style="margin-top:0">
+        <label>Account for<div class="seg hr-seg">${['Division', 'Circle', 'State'].map(l => `<button type="button" data-level="${l}" class="${l === ff.level ? 'on' : ''}">${l}</button>`).join('')}</div></label>
+        ${ff.level === 'State' ? '' : `<label>Circle<select name="circle"><option value="">— Choose —</option>${circles.map(c => `<option ${c.circle === ff.circle ? 'selected' : ''}>${esc(c.circle)}</option>`).join('')}</select></label>`}
+        ${ff.level === 'Division' ? `<label>Division<select name="division" ${circle ? '' : 'disabled'}><option value="">— Choose —</option>${circle ? circle.divisions.map(d => `<option ${d === ff.division ? 'selected' : ''}>${esc(d)}</option>`).join('') : ''}</select></label>` : ''}
+        <label>Email <span class="faint">(they sign in with it)</span><input name="email" type="email" value="${esc(ff.email || '')}"></label>
+        <label>Name<input name="name" value="${esc(ff.name || '')}"></label>
+        <div class="hr-two"><label>Designation<input name="desig" value="${esc(ff.desig || '')}"></label><label>Mobile number<input name="phone" inputmode="numeric" value="${esc(ff.phone || '')}"></label></div>
+        <label>Password <span class="faint">(8+ characters)</span><input name="password" value="${esc(pw)}"></label>
+        <button class="btn primary" type="submit">Create the account</button><div id="ferr" class="hr-err" role="alert"></div></form></div></div>`;
+    document.body.appendChild(el);
+    const f = $('#nf'), keep = () => { ['circle', 'division', 'email', 'name', 'desig', 'phone', 'password'].forEach(k => { if (f[k]) ff[k] = f[k].value; }); };
+    const close = () => el.remove();
+    el.addEventListener('click', e => { if (e.target === el || e.target.closest('.x')) close(); });
+    f.querySelectorAll('[data-level]').forEach(b => b.onclick = () => { keep(); ff.level = b.dataset.level; newUser(ff); });
+    if (f.circle) f.circle.onchange = () => { keep(); ff.division = ''; newUser(ff); };
+    f.onsubmit = e => {
+      e.preventDefault(); keep();
+      submitting(f, 'Creating…', async () => {
+        U.data = await API.call('userCreate', ff);
+        close(); toast('Account made for ' + ff.email + '. It works now.'); U.filter = 'Active'; renderUsers();
+      });
+    };
   }
   async function userAct(a, email, btn) {
     if (a === 'show') { U.show[email] = 1; renderUsers(); return; }

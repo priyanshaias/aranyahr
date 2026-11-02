@@ -2,7 +2,7 @@
 const { load } = require('./mock.js'), assert = require('assert');
 const { books: makeBooks, OFF_H } = require('./seed.js');
 const books = makeBooks();
-const T = load(process.argv[2] || __dirname + '/../apps-script', books, { SHEET_IDS: { OFF: 'OFF', FV: 'FV', CDL: 'CDL', ASDEO: 'ASDEO', HR: 'HR' }, ACCOUNTS: { grv: { role: 'admin', name: 'PMC admin', password: 'admin-pass-1' } } });
+const T = load(process.argv[2] || __dirname + '/../apps-script', books, { SHEET_IDS: { OFF: 'OFF', FV: 'FV', CDL: 'CDL', ASDEO: 'ASDEO', HR: 'HR' }, ACCOUNTS: { grv: { role: 'admin', name: 'PMC admin', password: 'admin-pass-1' }, adm2: { role: 'admin', name: 'Second admin', password: 'admin-pass-2' } } });
 // an old CDL+BS user, with the old 500-round hash
 const oldHash = T.run("oldHash_('salt1', 'oldpassword')");
 books.CDL.getSheetByName('Users').v.push(['old@x.in', 'Hill', 'Kurseong', 'Old User', 'RO', '9876543210', 'Active', '01-10-2026', '', 'salt1', oldHash]);
@@ -120,4 +120,15 @@ assert(/is verified/.test(T.ctx.doGet({ parameter: { verify: tok } })));
 assert.strictEqual(ok(T.post({ action: 'users', token: adm })).rows.find(r => r.email === 'dj@x.in').verified, 'Yes');
 ok(T.post({ action: 'userStatus', token: adm, email: 'dj@x.in', active: false }));
 bad(T.post({ action: 'home', token: djTok }), /disabled/);
+// superadmin: only grv creates users, and they work at once
+const nu = { email: 'made@x.in', level: 'Division', circle: 'Hill', division: 'Darjeeling', name: 'Made By Grv', desig: 'Clerk', phone: '9876522222', password: 'madepass1' };
+const adm2 = ok(T.post({ action: 'login', username: 'adm2', password: 'admin-pass-2' }));
+assert(!adm2.user.isSuper && ok(T.post({ action: 'login', username: 'grv', password: 'admin-pass-1' })).user.isSuper, 'only grv is superadmin');
+bad(T.post(Object.assign({ action: 'userCreate', token: adm2.token }, nu)), /Only the superadmin/);
+bad(T.post(Object.assign({ action: 'userCreate', token: ccf }, nu)), /administrators/);
+const made = ok(T.post(Object.assign({ action: 'userCreate', token: adm }, nu))).rows.find(r => r.email === 'made@x.in');
+assert.strictEqual(made.status, 'Active'); assert(/created the account/.test(made.approvedBy));
+assert(ok(T.post({ action: 'login', username: 'made@x.in', password: 'madepass1' })).token, 'made user signs in at once');
+bad(T.post(Object.assign({ action: 'userCreate', token: adm }, nu)), /already has an account/);
+bad(T.post(Object.assign({ action: 'userCreate', token: adm }, nu, { email: 'x2@x.in', phone: '12' })), /mobile/);
 console.log('All checks passed.');
