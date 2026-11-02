@@ -131,4 +131,22 @@ assert.strictEqual(made.status, 'Active'); assert(/created the account/.test(mad
 assert(ok(T.post({ action: 'login', username: 'made@x.in', password: 'madepass1' })).token, 'made user signs in at once');
 bad(T.post(Object.assign({ action: 'userCreate', token: adm }, nu)), /already has an account/);
 bad(T.post(Object.assign({ action: 'userCreate', token: adm }, nu, { email: 'x2@x.in', phone: '12' })), /mobile/);
+// admins made by the superadmin on the Users page
+const na = { email: 'newadmin@x.in', level: 'Admin', name: 'New Admin', desig: 'ACF', phone: '9876544444', password: 'adminpass9' };
+bad(T.post(Object.assign({ action: 'userCreate', token: adm2.token }, na)), /Only the superadmin/);
+assert.strictEqual(ok(T.post(Object.assign({ action: 'userCreate', token: adm }, na))).rows.find(r => r.email === 'newadmin@x.in').level, 'Admin');
+const nat = ok(T.post({ action: 'login', username: 'newadmin@x.in', password: 'adminpass9' }));
+assert(nat.user.isAdmin && !nat.user.isSuper, 'a web admin is an admin, not superadmin');
+assert(ok(T.post({ action: 'overview', token: nat.token })).rows.length > 1, 'sees every division');
+ok(T.post({ action: 'userDecide', token: nat.token, email: 'state@x.in', approve: true }));   // approves users
+bad(T.post({ action: 'userStatus', token: nat.token, email: 'newadmin@x.in', active: false }), /superadmin/);   // cannot touch admins
+bad(T.post(Object.assign({ action: 'userCreate', token: nat.token }, nu, { email: 'z@x.in' })), /Only the superadmin/);
+bad(T.post({ action: 'userRole', token: nat.token, email: 'made@x.in', admin: true }), /Only the superadmin/);
+// make admin / remove admin: back to their own account, and signed out
+const madeTok = ok(T.post({ action: 'login', username: 'made@x.in', password: 'madepass1' })).token;
+assert.strictEqual(ok(T.post({ action: 'userRole', token: adm, email: 'made@x.in', admin: true })).rows.find(r => r.email === 'made@x.in').level, 'Admin');
+bad(T.post({ action: 'home', token: madeTok }), /sign in again/);
+assert(ok(T.post({ action: 'login', username: 'made@x.in', password: 'madepass1' })).user.isAdmin);
+assert.strictEqual(ok(T.post({ action: 'userRole', token: adm, email: 'made@x.in', admin: false })).rows.find(r => r.email === 'made@x.in').level, 'Division');
+assert(!ok(T.post({ action: 'login', username: 'made@x.in', password: 'madepass1' })).user.isAdmin);
 console.log('All checks passed.');

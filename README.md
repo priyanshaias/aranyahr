@@ -28,7 +28,8 @@ GitHub Pages (docs/)                 ──►  "AranyaHR API" (one Apps Script 
 | Division | their own division | their own division, every cadre | after the admin approves |
 | Circle | every division of the circle | nothing | after the admin approves |
 | State | everything | nothing | after the admin approves |
-| Admin (`Config.local.gs`) | everything | everything, approvals, users | always |
+| **Superadmin** `grv` (`Config.local.gs`) | everything | everything; the only one who creates users and admins, and changes admins' accounts | always |
+| **Admin** (made by the superadmin on the Users page) | everything | everything: approvals, users (not admins), ranges, settings | as soon as it is made |
 
 - **Sign-up** is on the AranyaHR page. Every new account waits on the admin's **Users** page until it is approved; the person is emailed when it is. When a division already has a user, the form tells the new person that they will be the second user and must ask the admin to approve the account.
 - **Passwords are kept as plain text**, as decided: in the Password column of the Users tab, and admins' in `Config.local.gs`. Keep the **AranyaHR · Users** sheet shared with nobody, and hide and protect its Users tab. The website shows a password only to an admin, on the Users page.
@@ -87,6 +88,13 @@ Both files are made in the browser; the PDF and Excel tools load only when neede
 - The filters are kept in the address, so a link opens the same view.
 
 Preview it on a larger set of made-up data with `node tests/devserver.js 8781 --big`.
+
+**Making admins:** only on the website, by `grv`.
+- **Users → + Create user → Admin** makes a new admin.
+- **Make admin** on any active user turns them into one.
+- **Remove admin** puts them back to their own division or circle account.
+
+A change of role signs the person out at once. Other admins can see admin rows but can't change, disable or reset them.
 
 ## Divisions and ranges
 

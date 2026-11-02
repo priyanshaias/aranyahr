@@ -13,7 +13,8 @@ const USER_COLS = [['email', 'Email'], ['level', 'Level'], ['circle', 'Circle'],
   ['phone', 'Mobile'], ['status', 'Status'], ['verified', 'Email verified'], ['password', 'Password'], ['on', 'Signed up on'], ['approvedBy', 'Approved by'],
   ['approvedOn', 'Approved on'], ['last', 'Last sign-in'], ['oldSalt', 'Old salt'], ['oldHash', 'Old hash']];
 const LEVELS = ['Division', 'Circle', 'State'];
-const SUPERADMIN = 'grv';   // the one admin who can also create users
+const SUPERADMIN = 'grv';   // the one admin who creates users and admins (in Config.local.gs)
+const ADMIN = 'Admin';      // the Level of an admin made by the superadmin on the Users page: sees everything, approves, manages users
 const ST = { active: 'Active', pending: 'Pending approval', disabled: 'Disabled', rejected: 'Rejected' };
 // the column of the Divisions tab that holds each module's own "Circle | Division"
 const MOD_COL = { off: 'In FR DFR FG', fv: 'In FV', cdl: 'In CDL+BS' };
@@ -66,11 +67,11 @@ function doPost(e) {
     const user = hrAuth_(body.token);
     if (a.indexOf('.') > 0) return hrJson_({ ok: true, data: callModule_(a, body, user) });
     const core = { home: home_, overview: overview_, users: users_, userDecide: userDecide_, userStatus: userStatus_, userPassword: userPassword_,
-      sendVerify: sendVerify_, settings: settings_, setSetting: setSetting_, ranges: ranges_, rangeAlias: rangeAlias_, userCreate: userCreate_ };
+      sendVerify: sendVerify_, settings: settings_, setSetting: setSetting_, ranges: ranges_, rangeAlias: rangeAlias_, userCreate: userCreate_, userRole: userRole_ };
     const fn = core[a];
     if (!fn) throw new Error('Unknown action: ' + a);
     if (a !== 'home' && a !== 'overview' && !user.isAdmin) throw new Error('Only administrators can do this.');
-    if (a === 'userCreate' && !user.isSuper) throw new Error('Only the superadmin can create users.');
+    if ((a === 'userCreate' || a === 'userRole') && !user.isSuper) throw new Error('Only the superadmin can create users and admins.');
     return hrJson_({ ok: true, data: fn(body, user) });
   } catch (err) {
     return hrJson_({ ok: false, error: String(err && err.message || err), conflict: !!(err && err.conflict) });
@@ -221,7 +222,7 @@ function canonRange_(division, raw, ranges) {
 
 function userObj_(r) {
   return { name: r.name, username: r.email, email: r.email, level: r.level || 'Division', circle: r.circle, division: r.division, desig: r.desig,
-    phone: r.phone, isAdmin: false, verified: r.verified === 'Yes' };
+    phone: r.phone, isAdmin: r.level === ADMIN, verified: r.verified === 'Yes' };
 }
 function readUsers_() { const t = readTabRows_(HR.USERS, USER_COLS); t.rows = t.rows.filter(r => (r.email = hrEmail_(r.email))); return t; }
 
@@ -258,6 +259,7 @@ function hrLogin_(body) {
   }
   cache.remove(failKey);
   const token = 'hr.' + Utilities.getUuid() + Utilities.getUuid().slice(0, 8);
+  user.at = Math.max(Date.now(), Number(cache.get('hr:re|' + user.email) || 0) + 1);   // after any role change, so this session counts
   cache.put('hr:sess|' + token, JSON.stringify(user), HR_SESSION_HOURS * 3600);
   return { token, user };
 }
@@ -267,7 +269,10 @@ function hrAuth_(token) {
   const cache = CacheService.getScriptCache(), s = cache.get('hr:sess|' + token);
   if (!s) throw new Error('Your sign-in has expired. Please sign in again.');
   const user = JSON.parse(s);
-  if (!user.isAdmin && cache.get('hr:off|' + user.email)) { cache.remove('hr:sess|' + token); throw new Error('This account is disabled. Please sign in again.'); }
+  if (!hrLocal_().accounts[user.username]) {   // a Users-tab account: disabled, or its role changed, since it signed in
+    if (cache.get('hr:off|' + user.email)) { cache.remove('hr:sess|' + token); throw new Error('This account is disabled. Please sign in again.'); }
+    if (Number(cache.get('hr:re|' + user.email) || 0) >= (user.at || 0)) { cache.remove('hr:sess|' + token); throw new Error('Your account was changed. Please sign in again.'); }
+  }
   return user;
 }
 
@@ -309,11 +314,24 @@ function signup_(body) {
   return { sent: true };
 }
 function signupVerify_(body) { const o = takeCode_('hr:su|' + hrEmail_(body.email), body.code); return createUser_(o.user, true); }
-/** The superadmin makes an account for someone: it works at once (it is approved by the superadmin). */
+/** The superadmin makes an account for someone, a user or an admin: it works at once (it is approved by the superadmin). */
 function userCreate_(body, user) {
-  createUser_(cleanSignup_(body), false, { status: ST.active, approvedBy: user.name + ' (created the account)', approvedOn: hrNow_() });
+  const admin = body.level === ADMIN, u = cleanSignup_(Object.assign({}, body, admin ? { level: 'State' } : {}));
+  if (admin) u.level = ADMIN;
+  createUser_(u, false, { status: ST.active, approvedBy: user.name + ' (created the account)', approvedOn: hrNow_() });
   return users_();
 }
+/** Superadmin: makes a user an admin, or an admin a user again (back to their division or circle; State if neither). */
+function userRole_(body, user) {
+  withUser_(body.email, (t, r) => {
+    const level = body.admin ? ADMIN : r.division ? 'Division' : r.circle ? 'Circle' : 'State';
+    setCells_(t, r, { level, approvedBy: user.name + (body.admin ? ' (made admin)' : ' (removed admin)'), approvedOn: hrNow_() });
+  });
+  CacheService.getScriptCache().put('hr:re|' + hrEmail_(body.email), String(Date.now()), HR_SESSION_HOURS * 3600);   // signs them out
+  return users_();
+}
+/** Only the superadmin may change an admin's account. */
+function guardAdminRow_(r, user) { if (r.level === ADMIN && !user.isSuper) throw new Error('Only the superadmin can change an admin’s account.'); }
 /** Every new account waits for the admin's approval (unless extra says otherwise). A second user of a division is told so. Returns {pending, second, message}. */
 function createUser_(u, verified, extra) {
   const r = hrLock_(() => {
@@ -381,20 +399,21 @@ function withUser_(email, fn) {
 /** Approve or reject a pending account; the user is told by email (if that fails, the decision still stands). */
 function userDecide_(body, user) {
   const ok = !!body.approve;
-  const r = withUser_(body.email, (t, r) => { setCells_(t, r, { status: ok ? ST.active : ST.rejected, approvedBy: user.name, approvedOn: hrNow_() }); return r; });
+  const r = withUser_(body.email, (t, r) => { guardAdminRow_(r, user); setCells_(t, r, { status: ok ? ST.active : ST.rejected, approvedBy: user.name, approvedOn: hrNow_() }); return r; });
   try { if (ok) hrMail_(r.email, HR.APP + ': your account is approved', 'Your AranyaHR account (' + (r.division || r.circle || 'State') + ') is approved. You can sign in now.'); } catch (e) {}
   return users_();
 }
-function userStatus_(body) {
+function userStatus_(body, user) {
   const on = !!body.active;
-  withUser_(body.email, (t, r) => setCells_(t, r, { status: on ? ST.active : ST.disabled }));
+  withUser_(body.email, (t, r) => { guardAdminRow_(r, user); setCells_(t, r, { status: on ? ST.active : ST.disabled }); });
   const c = CacheService.getScriptCache(), k = 'hr:off|' + hrEmail_(body.email);
   if (on) c.remove(k); else c.put(k, '1', HR_SESSION_HOURS * 3600);
   return users_();
 }
-function userPassword_(body) {
+function userPassword_(body, user) {
   const pw = String(body.password || '');
   if (pw.length < 8) throw new Error('The password must have at least 8 characters.');
+  withUser_(body.email, (t, r) => guardAdminRow_(r, user));
   setPassword_(hrEmail_(body.email), pw);
   return users_();
 }

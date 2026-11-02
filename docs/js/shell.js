@@ -264,22 +264,24 @@
     const list = rows.filter(r => (!U.filter || r.status === U.filter) && (!U.level || r.level === U.level) && (!q || (r.name + r.email + r.division + r.circle + r.phone).toLowerCase().includes(q)));
     const chip = (v, t) => `<button class="chip ${U.filter === v ? 'on' : ''}" data-f="${v}">${t}<span class="n">${count(v)}</span></button>`;
     const pill = s => `<span class="pill ${s === 'Active' ? 'verified' : s === 'Pending approval' ? 'pending' : 'unverified'}">${esc(s)}</span>`;
-    const where = r => r.level === 'Division' ? `${esc(r.division)}<div class="faint">${esc(r.circle)}</div>` : r.level === 'Circle' ? `${esc(r.circle)} circle<div class="faint">view only</div>` : 'State<div class="faint">view only</div>';
+    const where = r => r.level === 'Admin' ? '<span class="pill partial">Admin</span><div class="faint">all divisions, approvals, users</div>' : r.level === 'Division' ? `${esc(r.division)}<div class="faint">${esc(r.circle)}</div>` : r.level === 'Circle' ? `${esc(r.circle)} circle<div class="faint">view only</div>` : 'State<div class="faint">view only</div>';
+    const sup = API.user.isSuper, mine = r => r.level !== 'Admin' || sup;   // only the superadmin changes an admin's account
     app.innerHTML = `<div class="head"><div><h1 class="page-title">Users.</h1><p class="page-sub">Every new account waits for your approval here.</p></div>
         ${API.user.isSuper ? '<span class="sp"></span><button class="btn primary" id="uNew">+ Create user</button>' : ''}</div>
       <div class="toolbar"><div class="chips">${chip('Pending approval', 'Waiting')}${chip('Active', 'Active')}${chip('Disabled', 'Disabled')}${chip('Rejected', 'Rejected')}${chip('', 'Everyone')}</div>
-        <select id="ul" class="hr-select"><option value="">All levels</option>${['Division', 'Circle', 'State'].map(l => `<option ${U.level === l ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        <select id="ul" class="hr-select"><option value="">All levels</option>${['Division', 'Circle', 'State', 'Admin'].map(l => `<option ${U.level === l ? 'selected' : ''}>${l}</option>`).join('')}</select>
         <label class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="uq" type="search" placeholder="Search name, email, division" value="${esc(U.q)}"></label></div>
       <div class="tablecard"><div class="tscroll"><table class="hr-table"><thead><tr><th>Name</th><th>For</th><th>Email · Mobile</th><th>Status</th><th>Email verified</th><th>Password</th><th></th></tr></thead><tbody>
         ${list.length ? list.map(r => `<tr><td><b>${esc(r.name)}</b><div class="faint">${esc(r.desig)} · signed up ${esc(r.on)}</div></td><td>${where(r)}</td>
           <td>${esc(r.email)}<div class="faint">${esc(r.phone)}</div></td><td>${pill(r.status)}${r.approvedBy ? `<div class="faint">${esc(r.approvedBy)}, ${esc(r.approvedOn)}</div>` : ''}</td>
           <td>${r.verified === 'Yes' ? '<span class="pill verified">Yes</span>' : `<span class="pill unverified">No</span> <button class="btn sm ghost" data-a="verify" data-e="${esc(r.email)}">Send email</button>`}</td>
-          <td>${r.password ? (U.show[r.email] ? `<code>${esc(r.password)}</code>` : `<button class="btn sm ghost" data-a="show" data-e="${esc(r.email)}">Show</button>`) : '<span class="faint">set at next sign-in</span>'}</td>
-          <td><div class="hr-acts">${r.status === 'Pending approval' ? `<button class="btn sm good" data-a="approve" data-e="${esc(r.email)}">Approve</button><button class="btn sm" data-a="reject" data-e="${esc(r.email)}">Reject</button>`
+          <td>${!mine(r) ? '<span class="faint">—</span>' : r.password ? (U.show[r.email] ? `<code>${esc(r.password)}</code>` : `<button class="btn sm ghost" data-a="show" data-e="${esc(r.email)}">Show</button>`) : '<span class="faint">set at next sign-in</span>'}</td>
+          <td><div class="hr-acts">${!mine(r) ? '<span class="faint">managed by the superadmin</span>' : `${r.status === 'Pending approval' ? `<button class="btn sm good" data-a="approve" data-e="${esc(r.email)}">Approve</button><button class="btn sm" data-a="reject" data-e="${esc(r.email)}">Reject</button>`
             : r.status === 'Active' ? `<button class="btn sm" data-a="disable" data-e="${esc(r.email)}">Disable</button>` : `<button class="btn sm" data-a="enable" data-e="${esc(r.email)}">Enable</button>`}
-            <button class="btn sm ghost" data-a="pass" data-e="${esc(r.email)}">Set password</button></div></td></tr>`).join('') : '<tr><td colspan="7" class="faint" style="padding:22px">No one here.</td></tr>'}
+            <button class="btn sm ghost" data-a="pass" data-e="${esc(r.email)}">Set password</button>
+            ${sup && r.status === 'Active' ? (r.level === 'Admin' ? `<button class="btn sm ghost" data-a="unadmin" data-e="${esc(r.email)}">Remove admin</button>` : `<button class="btn sm ghost" data-a="admin" data-e="${esc(r.email)}">Make admin</button>`) : ''}`}</div></td></tr>`).join('') : '<tr><td colspan="7" class="faint" style="padding:22px">No one here.</td></tr>'}
       </tbody></table></div></div>
-      <div class="tablecard" style="margin-top:18px;padding:14px 16px"><b>Admin accounts</b> <span class="faint">(in Config.local.gs in Apps Script)</span>
+      <div class="tablecard" style="margin-top:18px;padding:14px 16px"><b>Superadmin</b> <span class="faint">(in Config.local.gs in Apps Script; makes users and admins here)</span>
         <div class="faint" style="margin-top:6px">${U.data.accounts.map(a => `${esc(a.username)} · ${esc(a.name)} · last sign-in ${esc(a.last || 'not yet')}`).join('<br>')}</div></div>`;
     app.querySelectorAll('[data-f]').forEach(b => b.onclick = () => { U.filter = b.dataset.f; renderUsers(); });
     $('#ul').onchange = e => { U.level = e.target.value; renderUsers(); };
@@ -296,8 +298,9 @@
     el.innerHTML = `<div class="dialog hr-dl" role="dialog" aria-modal="true" aria-label="Create a user">
       <div class="dhead"><div><h2>Create a user</h2><div class="sub">The account works at once. Tell them their email and password.</div></div><button class="x" aria-label="Close">×</button></div>
       <div class="dbody"><form class="form" id="nf" novalidate style="margin-top:0">
-        <label>Account for<div class="seg hr-seg">${['Division', 'Circle', 'State'].map(l => `<button type="button" data-level="${l}" class="${l === ff.level ? 'on' : ''}">${l}</button>`).join('')}</div></label>
-        ${ff.level === 'State' ? '' : `<label>Circle<select name="circle"><option value="">— Choose —</option>${circles.map(c => `<option ${c.circle === ff.circle ? 'selected' : ''}>${esc(c.circle)}</option>`).join('')}</select></label>`}
+        <label>Account for<div class="seg hr-seg">${['Division', 'Circle', 'State', 'Admin'].map(l => `<button type="button" data-level="${l}" class="${l === ff.level ? 'on' : ''}">${l}</button>`).join('')}</div></label>
+        ${ff.level === 'Admin' ? '<div class="notice info" style="margin:0">An admin sees every division and cadre, approves changes and new accounts, and manages users, ranges and settings. Only you can create admins.</div>' : ''}
+        ${ff.level === 'State' || ff.level === 'Admin' ? '' : `<label>Circle<select name="circle"><option value="">— Choose —</option>${circles.map(c => `<option ${c.circle === ff.circle ? 'selected' : ''}>${esc(c.circle)}</option>`).join('')}</select></label>`}
         ${ff.level === 'Division' ? `<label>Division<select name="division" ${circle ? '' : 'disabled'}><option value="">— Choose —</option>${circle ? circle.divisions.map(d => `<option ${d === ff.division ? 'selected' : ''}>${esc(d)}</option>`).join('') : ''}</select></label>` : ''}
         <label>Email <span class="faint">(they sign in with it)</span><input name="email" type="email" value="${esc(ff.email || '')}"></label>
         <label>Name<input name="name" value="${esc(ff.name || '')}"></label>
@@ -320,7 +323,8 @@
   }
   async function userAct(a, email, btn) {
     if (a === 'show') { U.show[email] = 1; renderUsers(); return; }
-    let body = { email }, action = { approve: 'userDecide', reject: 'userDecide', disable: 'userStatus', enable: 'userStatus', pass: 'userPassword', verify: 'sendVerify' }[a];
+    let body = { email }, action = { approve: 'userDecide', reject: 'userDecide', disable: 'userStatus', enable: 'userStatus', pass: 'userPassword', verify: 'sendVerify', admin: 'userRole', unadmin: 'userRole' }[a];
+    if (a === 'admin' || a === 'unadmin') { body.admin = a === 'admin'; if (!confirm((a === 'admin' ? 'Make ' + email + ' an admin? They will see every division, approve changes and manage users.' : 'Remove admin from ' + email + '? They go back to their own account.') + ' They will be signed out.')) return; }
     if (a === 'approve' || a === 'reject') body.approve = a === 'approve';
     if (a === 'disable' || a === 'enable') body.active = a === 'enable';
     if (a === 'pass') { const pw = prompt('New password for ' + email + ' (8+ characters):'); if (!pw) return; body.password = pw; }
@@ -329,7 +333,7 @@
     try {
       const r = await API.call(action, body);
       if (r && r.rows) U.data = r;
-      toast({ approve: 'Approved. They have been told by email.', reject: 'Rejected', disable: 'Disabled; they are signed out', enable: 'Enabled', pass: 'Password set', verify: 'Verification email sent' }[a]);
+      toast({ approve: 'Approved. They have been told by email.', reject: 'Rejected', disable: 'Disabled; they are signed out', enable: 'Enabled', pass: 'Password set', verify: 'Verification email sent', admin: 'Now an admin', unadmin: 'No longer an admin' }[a]);
       renderUsers();
     } catch (e) { toast(e.message, true); btn.disabled = false; }
   }
