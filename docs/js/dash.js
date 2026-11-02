@@ -112,7 +112,11 @@
   let app;
   async function render(el, force) {
     app = el; readUrl();
-    if (!S.data || force) { app.innerHTML = SH().loader('Building the dashboard…', 'Counting every division and cadre…'); S.data = await SH().guard(() => API.call('overview')); S.home = {}; }
+    if (!S.data || force) {
+      const seq = SH().now(); app.innerHTML = SH().loader('Building the dashboard…', 'Counting every division and cadre…');
+      const d = await SH().guard(() => API.call('overview')); S.data = d; S.home = {};
+      if (SH().left(seq)) return;   // another page was opened meanwhile
+    }
     draw();
   }
   function scopeRows() { return S.data.rows.filter(r => (!S.circle || r.circle === S.circle) && (!S.division || r.division === S.division)); }
@@ -169,7 +173,8 @@
     const body = $('#hdBody');
     if (S.division) {
       body.innerHTML = SH().loader(`Opening ${S.division}…`, 'Collecting every cadre’s list…');
-      const h = await loadHome(S.division);
+      const seq = SH().now(), h = await loadHome(S.division);
+      if (SH().left(seq)) return;
       if (S.division !== h.division) return;
       body.innerHTML = S.view === 'workforce' ? divisionWorkforce(h, inScope[0]) : divisionProgress(h, inScope[0]);
       $('#hdDl').onclick = () => window.HR_DOWNLOAD.open(h);

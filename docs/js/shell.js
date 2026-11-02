@@ -33,6 +33,10 @@
     <path class="trunk" d="M32 57V30M32 42l-7-6M32 37l6-5"/><path class="ground" d="M17 57h30"/></svg>`;
   const loader = (title, step) => `<div class="loader">${TREE}<b class="ld-title">${esc(title)}</b><div class="ibar"><i></i></div><p class="ld-step">${esc(step || 'Almost there…')}</p>
     <p class="ld-help">Need help? ${esc(HELP.name)}, ${esc(HELP.office)} · <a href="tel:${HELP.tel}">${esc(HELP.phone)}</a></p></div>`;
+  // Each page change gets a number. A page that waits for the server draws only if it is still the page on screen,
+  // so a slow answer (e.g. Approvals) never draws over the page opened after it.
+  let SEQ = 0;
+  const now = () => SEQ, left = seq => seq !== SEQ;
   async function guard(fn) {
     try { return await fn(); }
     catch (e) { toast(e.message || 'Something went wrong.', true); if (e.auth) { go('#/'); route(); } throw e; }
@@ -75,7 +79,8 @@
   }
 
   async function renderSignup() {
-    if (!A.lists) { app.innerHTML = loader('Getting the list of divisions…'); A.lists = await API.open('lists').catch(e => { app.innerHTML = card('Create an account', esc(e.message), ''); throw e; }); }
+    const seq = now();
+    if (!A.lists) { app.innerHTML = loader('Getting the list of divisions…'); A.lists = await API.open('lists').catch(e => { if (!left(seq)) app.innerHTML = card('Create an account', esc(e.message), ''); throw e; }); if (left(seq)) return; }
     const L = A.lists, ff = A.form, level = ff.level || 'Division';
     const circle = L.circles.find(c => c.circle === ff.circle);
     app.innerHTML = card('Create an account', '', `<form class="form" id="f" novalidate>
@@ -161,7 +166,8 @@
     if (!division && (u.isAdmin || u.level !== 'Division')) { await renderPicker(); return; }
     if (!H.data || H.data.division !== division) {
       app.innerHTML = loader(division ? `Opening ${division}…` : 'Opening your division…', 'Collecting every cadre’s list…');
-      const d = await guard(() => API.call('home', { division }));
+      const seq = now(), d = await guard(() => API.call('home', { division }));
+      if (left(seq)) return;
       if (H.data && H.data.division !== d.division) Object.assign(H, { range: 'all', cadre: 'all', q: '' });
       H.data = d;
     }
@@ -222,7 +228,8 @@
   const sumOf = (r, ks) => ks.reduce((a, k) => { const x = r.c[k]; if (x) { a.total += x.total; a.done += x.done; } return a; }, { total: 0, done: 0 });
   async function renderPicker(circle) {
     if (!OV) app.innerHTML = loader('Opening the divisions…', 'Counting every cadre…');
-    const o = await loadOverview(), u = API.user;
+    const seq = now(), o = await loadOverview(), u = API.user;
+    if (left(seq)) return;
     const circles = [...new Set(o.rows.map(r => r.circle))];
     if (circles.length === 1) circle = circles[0];
     const tile = (title, sub, s, href) => `<a class="tile${s.total ? '' : ' empty'}" href="${href}" style="text-decoration:none"><div class="ring" style="--p:${pct(s.done, s.total)}"><i>${pct(s.done, s.total)}%</i></div>
@@ -242,7 +249,8 @@
   /* ---------------- admin: approvals ---------------- */
   async function renderApprovals() {
     app.innerHTML = loader('Collecting what is waiting…', 'Asking every cadre…');
-    const [ov, off, cdl] = await Promise.all([loadOverview(true), API.call('off.adminSummary').catch(() => null), API.call('cdl.pending').catch(() => null)]);
+    const seq = now(), [ov, off, cdl] = await Promise.all([loadOverview(true), API.call('off.adminSummary').catch(() => null), API.call('cdl.pending').catch(() => null)]);
+    if (left(seq)) return;
     const n = ks => cdl ? cdl.rows.filter(p => ks.includes(p.cadre)).length : '—';
     const box = (title, count, sub, href) => `<a class="tile" href="${href}" style="text-decoration:none"><div class="t"><b>${esc(title)}</b><span>${sub}</span><br><span class="num hr-big">${count}</span> <span class="faint">waiting</span></div></a>`;
     app.innerHTML = `<div class="head"><div><h1 class="page-title">Approvals.</h1><p class="page-sub">What is waiting for an admin, cadre by cadre. Each opens that cadre’s own approval screen.</p></div></div>
@@ -258,7 +266,7 @@
   /* ---------------- admin: users ---------------- */
   const U = { data: null, filter: 'Pending approval', level: '', q: '', show: {} };
   async function renderUsers(reload) {
-    if (!U.data || reload) { app.innerHTML = loader('Reading the users…'); U.data = await guard(() => API.call('users')); }
+    if (!U.data || reload) { const seq = now(); app.innerHTML = loader('Reading the users…'); const d = await guard(() => API.call('users')); if (left(seq)) return; U.data = d; }
     const rows = U.data.rows, q = U.q.toLowerCase();
     const count = s => rows.filter(r => !s || r.status === s).length;
     const list = rows.filter(r => (!U.filter || r.status === U.filter) && (!U.level || r.level === U.level) && (!q || (r.name + r.email + r.division + r.circle + r.phone).toLowerCase().includes(q)));
@@ -316,8 +324,8 @@
     f.onsubmit = e => {
       e.preventDefault(); keep();
       submitting(f, 'Creating…', async () => {
-        U.data = await API.call('userCreate', ff);
-        close(); toast('Account made for ' + ff.email + '. It works now.'); U.filter = 'Active'; renderUsers();
+        const seq = now(); U.data = await API.call('userCreate', ff);
+        close(); if (left(seq)) return; toast('Account made for ' + ff.email + '. It works now.'); U.filter = 'Active'; renderUsers();
       });
     };
   }
@@ -330,9 +338,11 @@
     if (a === 'pass') { const pw = prompt('New password for ' + email + ' (8+ characters):'); if (!pw) return; body.password = pw; }
     if (a === 'reject' && !confirm('Reject the account of ' + email + '?')) return;
     btn.disabled = true;
+    const seq = now();
     try {
       const r = await API.call(action, body);
       if (r && r.rows) U.data = r;
+      if (left(seq)) return;
       toast({ approve: 'Approved. They have been told by email.', reject: 'Rejected', disable: 'Disabled; they are signed out', enable: 'Enabled', pass: 'Password set', verify: 'Verification email sent', admin: 'Now an admin', unadmin: 'No longer an admin' }[a]);
       renderUsers();
     } catch (e) { toast(e.message, true); btn.disabled = false; }
@@ -342,14 +352,16 @@
   async function renderRanges(division) {
     if (!division) {
       app.innerHTML = loader('Opening the divisions…');
-      const d = await guard(() => API.call('ranges'));
+      const seq = now(), d = await guard(() => API.call('ranges'));
+      if (left(seq)) return;
       const by = {}; d.divisions.forEach(x => (by[x.circle] = by[x.circle] || []).push(x.division));
       app.innerHTML = `<div class="head"><div><h1 class="page-title">Ranges.</h1><p class="page-sub">Each cadre writes its range in its own way. Here every spelling is joined to one range, so the range filter works across cadres. The cadre sheets are not changed.</p></div></div>
         ${Object.keys(by).map(c => `<h3 style="margin:18px 0 8px">${esc(c)}</h3><div class="chips">${by[c].map(x => `<a class="chip" href="#/ranges/${enc(x)}" style="display:inline-flex;align-items:center;text-decoration:none">${esc(x)}</a>`).join('')}</div>`).join('')}`;
       return;
     }
     app.innerHTML = loader(`Reading the ranges of ${division}…`, 'Matching every cadre’s spelling…');
-    drawRanges(await guard(() => API.call('ranges', { division })));
+    const seq = now(), d = await guard(() => API.call('ranges', { division }));
+    if (!left(seq)) drawRanges(d);
   }
   function drawRanges(d) {
     app.innerHTML = `<div class="crumbs"><a href="#/ranges">All divisions</a><span class="sep">/</span><span>${esc(d.division)}</span></div>
@@ -363,7 +375,8 @@
     app.querySelectorAll('[data-i]').forEach(b => b.onclick = async () => {
       const x = d.unmatched[+b.dataset.i], sel = $('#r' + b.dataset.i).value;
       b.disabled = true;
-      try { drawRanges(await API.call('rangeAlias', { division: d.division, range: sel === '__new' ? x.value : sel, value: x.value })); H.data = null; toast('Saved'); }
+      const seq = now();
+      try { const r = await API.call('rangeAlias', { division: d.division, range: sel === '__new' ? x.value : sel, value: x.value }); H.data = null; toast('Saved'); if (!left(seq)) drawRanges(r); }
       catch (e) { toast(e.message, true); b.disabled = false; }
     });
   }
@@ -371,19 +384,22 @@
   /* ---------------- admin: settings ---------------- */
   async function renderSettings() {
     app.innerHTML = loader('Reading the settings…');
-    const s = (await guard(() => API.call('settings'))).settings, on = /^yes$/i.test(s['Email code at sign-up']);
+    const seq = now(), s = (await guard(() => API.call('settings'))).settings, on = /^yes$/i.test(s['Email code at sign-up']);
+    if (left(seq)) return;
     app.innerHTML = `<div class="head"><div><h1 class="page-title">Settings.</h1></div></div>
       <div class="tablecard" style="padding:18px 20px"><b>Email code at sign-up</b>
         <p class="faint" style="margin:4px 0 12px">On: a 6-digit code is emailed and must be entered before the account is made. Off: the account is made at once; you can send anyone a verification email from the Users page.</p>
         <div class="seg hr-seg"><button data-v="Yes" class="${on ? 'on' : ''}">On</button><button data-v="No" class="${on ? '' : 'on'}">Off</button></div></div>`;
     app.querySelectorAll('[data-v]').forEach(b => b.onclick = async () => {
-      try { await API.call('setSetting', { key: 'Email code at sign-up', value: b.dataset.v }); toast('Saved'); renderSettings(); } catch (e) { toast(e.message, true); }
+      const seq = now();
+      try { await API.call('setSetting', { key: 'Email code at sign-up', value: b.dataset.v }); toast('Saved'); if (!left(seq)) renderSettings(); } catch (e) { toast(e.message, true); }
     });
   }
 
   /* ---------------- router ---------------- */
   function start() { renderWho(); if (!location.hash || location.hash === '#/' || location.hash === '#/signup') { history.replaceState(null, '', '#/'); } route(); }
   async function route() {
+    SEQ++;
     renderWho();
     const parts = location.hash.replace(/^#\/?/, '').split('?')[0].split('/').map(decodeURIComponent), u = API.user;
     try {
@@ -402,7 +418,7 @@
     } catch (e) { /* toast already shown */ }
     window.scrollTo(0, 0);
   }
-  window.HR_SHELL = { esc, loader, guard, CAD, pageOf };   // for the dashboard (dash.js)
+  window.HR_SHELL = { esc, loader, guard, CAD, pageOf, now, left };   // for the dashboard (dash.js)
   window.addEventListener('hashchange', route);
   route();
 })();
